@@ -8,7 +8,7 @@ defmodule Systeme.Supervisor do
   def init([]) do
     children = [
       # Define workers and child supervisors to be supervised
-      # worker(Systeme.Worker, [])
+      #worker(Systeme.Core, [])
     ]
 
     # See http://elixir-lang.org/docs/stable/Supervisor.Behaviour.html

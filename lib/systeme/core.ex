@@ -130,14 +130,17 @@ defmodule Systeme.Core do
   defp wait_loop(es) do
     receive do
       :finish -> exit(:normal)
-      {e, t} ->
-        if Enum.find(es, fn(ne) -> ne == e; end) do
-          if t > current_time() do
-            set_current_time(t)
+    after 0 ->
+      receive do
+        {e, t} ->
+          if Enum.find(es, fn(ne) -> ne == e; end) do
+            if t > current_time() do
+              set_current_time(t)
+            end
+          else
+            wait_loop(es)
           end
-        else
-          wait_loop(es)
-        end
+      end
     end
   end
 
@@ -249,6 +252,7 @@ defmodule Systeme.Core do
   end
 
   def run() do
+    IO.puts "Systeme simulator start"
     Process.register(self, :main_thread)
     :application.start(:gproc)
     run_simulate()
@@ -260,6 +264,12 @@ defmodule Systeme.Core do
     receive do
       :finish_ok -> 
     end
+    IO.puts "Simulation finished"
+  end
+
+  def start_link() do
+    pid = spawn_link(&run/0)
+    {:ok, pid}
   end
 
   def finish() do

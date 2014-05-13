@@ -23,10 +23,7 @@ defmodule SystemeTest do
   end
 
   test "the truth" do
-    IO.inspect SystemeTest.__systeme_threads__
-    IO.inspect Systeme.Core.__systeme_modules__
-    IO.inspect Systeme.Core.__all_systeme_threads__
-    Systeme.Core.run
+    run
     assert(true)
   end
 end
