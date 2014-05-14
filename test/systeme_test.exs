@@ -24,6 +24,10 @@ defmodule SystemeTest do
     info "bbb"
   end
 
+  always(signal(:aaa)) do
+    info read_signal(:aaa)
+  end
+
   test "the truth" do
     run
     assert(true)

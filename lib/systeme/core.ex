@@ -227,7 +227,7 @@ defmodule Systeme.Core do
     end
   end
 
-  defp simulate_terminate(size, ths \\ [], ts \\ []) do
+  defp simulate_terminate(size, ths, ts) do
     receive do
       {:inactive, pid} ->
         ths = Enum.uniq([pid | ths])
