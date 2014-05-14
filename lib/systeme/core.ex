@@ -129,11 +129,11 @@ defmodule Systeme.Core do
     end)
     inactive_thread()
     wait_loop(es)
-    wait_flush(current_time())
     Enum.each(es, fn(e) ->
        :gproc.unreg({:p, :l, e})
     end)
     active_thread()
+    wait_flush(current_time())
   end
   def wait(e) do
     wait([e])
@@ -147,7 +147,7 @@ defmodule Systeme.Core do
     after 0 ->
       receive do
         {e, t} ->
-          if Enum.find(es, fn(ne) -> ne == e and t >= current_time(); end) do
+          if Enum.find(es, fn(ne) -> ne == e end) do
             if t > current_time() do
               set_current_time(t)
             end
@@ -205,25 +205,44 @@ defmodule Systeme.Core do
   end
 
   def simulate(size, ths \\ [], ts \\ []) do
+    ts = simulate_collect_time(ts)
     receive do
       :finish -> simulate_terminate(size, ths, ts)
+      {:time, t} ->
+        simulate(size, ths, Enum.uniq([t|ts]) |> Enum.sort)
+      {:active, pid} ->
+        ths = List.delete(ths, pid)
+        simulate(size, ths, ts)
       {:inactive, pid} ->
         ths = Enum.uniq([pid | ths])
-        if length(ths) == size do
+        if length(ths) == size do #and all_threads_waiting?(ths) do
           if length(ts) > 0 do
-            simulate(size, ths, notify_time(ts))
+            receive do
+              :finish -> simulate_terminate(size, ths, ts)
+              {:time, t} ->
+                simulate(size, ths, Enum.uniq([t|ts]) |> Enum.sort)
+              {:active, pid} ->
+                ths = List.delete(ths, pid)
+                simulate(size, ths, ts)
+            after 0 ->
+              simulate(size, ths, notify_time(ts))
+            end
           else
             simulate(size, ths, ts)
           end
         else
           simulate(size, ths, ts)
         end
-      {:active, pid} ->
-        ths = List.delete(ths, pid)
-        simulate(size, ths, ts)
+      e -> IO.inspect e; simulate(size, ths, ts)
+    end
+  end
+
+  defp simulate_collect_time(ts) do
+    receive do
       {:time, t} ->
-        simulate(size, ths, Enum.uniq([t|ts]) |> Enum.sort)
-      _ -> simulate(size, ths, ts)
+        simulate_collect_time(Enum.uniq([t|ts]) |> Enum.sort)
+    after 0 ->
+      ts
     end
   end
 
@@ -241,6 +260,13 @@ defmodule Systeme.Core do
         end
       _ -> simulate_terminate(size, ths, ts)
     end
+  end
+
+  defp all_threads_waiting?(ths) do
+    Enum.reduce(ths, true, fn(th, acc)->
+      {_, stat} = :erlang.process_info(th, :status)
+      if stat != :waiting, do: false, else: acc
+    end)
   end
 
   defp threads_terminate(size) when size > 0 do
