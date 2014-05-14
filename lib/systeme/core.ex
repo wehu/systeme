@@ -1,5 +1,7 @@
 defmodule Systeme.Core do
 
+  require Systeme.Signals
+
   defmacro __using__(_) do
     quote do
       unless Module.get_attribute(__MODULE__, :systeme_threads) do
@@ -145,7 +147,7 @@ defmodule Systeme.Core do
     after 0 ->
       receive do
         {e, t} ->
-          if Enum.find(es, fn(ne) -> ne == e; end) do
+          if Enum.find(es, fn(ne) -> ne == e and t >= current_time(); end) do
             if t > current_time() do
               set_current_time(t)
             end
@@ -186,6 +188,15 @@ defmodule Systeme.Core do
     quote do
       {:time, current_time() + unquote(n)}
     end
+  end
+
+  def read_signal(s) do
+    Systeme.Signals.read(s)
+  end
+
+  def write_signal(s, v) do
+    Systeme.Signals.write(s, v)
+    notify(signal(s))
   end
 
   def run_simulate() do
@@ -278,6 +289,7 @@ defmodule Systeme.Core do
   def run() do
     IO.puts "Systeme simulator start"
     Process.register(self, :systeme_main_thread)
+    Systeme.Signals.start()
     :application.start(:gproc)
     run_simulate()
     run_initial()

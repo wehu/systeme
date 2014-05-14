@@ -9,6 +9,8 @@ defmodule SystemeTest do
    info "b"
    wait(time(1))
    info "c"
+   write_signal(:aaa, 1)
+   info read_signal(:aaa)
    wait(time(3))
    finish()
   end
