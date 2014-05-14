@@ -72,6 +72,11 @@ defmodule Systeme.Core do
           Systeme.Core.active_thread()
           unquote(body)
           Systeme.Core.inactive_thread()
+          receive do
+            :finish ->
+              send(:systeme_simulate_thread, :finished)
+              exit(:normal)
+          end
         end)
       end
     end 
@@ -94,6 +99,11 @@ defmodule Systeme.Core do
           Systeme.Core.active_thread()
           f.(f)
           Systeme.Core.inactive_thread()
+          receive do
+            :finish ->
+              send(:systeme_simulate_thread, :finished)
+              exit(:normal)
+          end
         end)
       end
     end
@@ -129,7 +139,9 @@ defmodule Systeme.Core do
 
   defp wait_loop(es) do
     receive do
-      :finish -> exit(:normal)
+      :finish ->
+         send(:systeme_simulate_thread, :finished)
+         exit(:normal)
     after 0 ->
       receive do
         {e, t} ->
@@ -140,6 +152,9 @@ defmodule Systeme.Core do
           else
             wait_loop(es)
           end
+        :finish ->
+          send(:systeme_simulate_thread, :finished)
+          exit(:normal)
       end
     end
   end
@@ -175,7 +190,7 @@ defmodule Systeme.Core do
 
   def run_simulate() do
     size = length(__all_systeme_threads__)
-    spawn_link(__MODULE__, :simulate, [size]) |> Process.register(:simulate_thread)
+    spawn_link(__MODULE__, :simulate, [size]) |> Process.register(:systeme_simulate_thread)
   end
 
   def simulate(size, ths \\ [], ts \\ []) do
@@ -201,13 +216,14 @@ defmodule Systeme.Core do
     end
   end
 
-  def simulate_terminate(size, ths \\ [], ts \\ []) do
+  defp simulate_terminate(size, ths \\ [], ts \\ []) do
     receive do
       {:inactive, pid} ->
         ths = Enum.uniq([pid | ths])
         if length(ths) == size do
           Enum.each(ths, fn(th)-> send(th, :finish) end)
-          send(:main_thread, :finish_ok)
+          threads_terminate(size)
+          send(:systeme_main_thread, :finished)
           exit(:normal)
         else
           simulate_terminate(size, ths, ts)
@@ -216,8 +232,16 @@ defmodule Systeme.Core do
     end
   end
 
+  defp threads_terminate(size) when size > 0 do
+    receive do
+      :finished -> threads_terminate(size - 1)
+    end
+  end
+  defp threads_terminate(0) do
+  end
+
   defp add_time(t) do
-    send(:simulate_thread, {:time, t})
+    send(:systeme_simulate_thread, {:time, t})
   end
 
   defp notify_time(ts) do
@@ -232,11 +256,11 @@ defmodule Systeme.Core do
   end
 
   def active_thread() do
-    send(:simulate_thread, {:active, self})
+    send(:systeme_simulate_thread, {:active, self})
   end
 
   def inactive_thread() do
-    send(:simulate_thread, {:inactive, self})
+    send(:systeme_simulate_thread, {:inactive, self})
   end
 
   def run_initial() do
@@ -253,16 +277,16 @@ defmodule Systeme.Core do
 
   def run() do
     IO.puts "Systeme simulator start"
-    Process.register(self, :main_thread)
+    Process.register(self, :systeme_main_thread)
     :application.start(:gproc)
     run_simulate()
     run_initial()
     run_always()
     receive do
-      :finish -> send(:simulate_thread, :finish)
+      :finish -> send(:systeme_simulate_thread, :finish)
     end
     receive do
-      :finish_ok -> 
+      :finished -> 
     end
     IO.puts "Simulation finished"
   end
@@ -273,7 +297,7 @@ defmodule Systeme.Core do
   end
 
   def finish() do
-    send(:main_thread, :finish)
+    send(:systeme_main_thread, :finish)
   end
 
 end
