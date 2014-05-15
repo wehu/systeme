@@ -11,7 +11,7 @@ defmodule SystemeTest do
    info "c"
    write_signal(:aaa, 1)
    info read_signal(:aaa)
-   wait(time(30000))
+   wait(time(10))
    finish()
   end
 
@@ -20,9 +20,11 @@ defmodule SystemeTest do
     info "aaa"
   end
 
+  Enum.each(1..1, fn(_) ->
   always(event(:a)) do
     info "bbb"
   end
+  end)
 
   always(signal(:aaa)) do
     info read_signal(:aaa)
