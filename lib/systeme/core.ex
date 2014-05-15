@@ -169,9 +169,7 @@ defmodule Systeme.Core do
   end
 
   def notify(e) do
-    :gproc.lookup_pids({:p, :l, e}) |> Enum.each(fn(pid) ->
-      send(:systeme_simulate_thread, {:active, pid})
-    end)
+    send(:systeme_simulate_thread, {:active, :gproc.lookup_pids({:p, :l, e})})
     :gproc.send({:p, :l, e}, {e, current_time()})
   end
 
@@ -213,8 +211,13 @@ defmodule Systeme.Core do
       :finish -> simulate_terminate(size, ths, ts)
       {:time, t} ->
         simulate(size, ths, Enum.uniq([t|ts]) |> Enum.sort)
-      {:active, pid} ->
-        ths = List.delete(ths, pid)
+      {:active, pids} ->
+        if !is_list(pids) do
+          pids = [pids]
+        end
+        ths = Enum.reduce(pids, ths, fn(pid, acc) ->
+          List.delete(acc, pid)
+        end)
         simulate(size, ths, ts)
       {:inactive, pid} ->
         ths = Enum.uniq([pid | ths])
@@ -268,7 +271,7 @@ defmodule Systeme.Core do
       _ -> simulate_terminate(size, ths, ts)
     after 10 ->
       send(:systeme_main_thread, :finished)
-      exit(:normal)
+      exit(:abnormal)
     end
   end
 
