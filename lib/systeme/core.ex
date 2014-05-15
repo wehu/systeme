@@ -267,6 +267,8 @@ defmodule Systeme.Core do
         end
       _ -> simulate_terminate(size, ths, ts)
     after 10 ->
+      send(:systeme_main_thread, :finished)
+      exit(:normal)
     end
   end
 
