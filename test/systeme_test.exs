@@ -20,7 +20,7 @@ defmodule SystemeTest do
     info "aaa"
   end
 
-  Enum.each(1..1, fn(_) ->
+  Enum.each(1..10, fn(_) ->
   always(event(:a)) do
     info "bbb"
   end

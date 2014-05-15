@@ -208,7 +208,7 @@ defmodule Systeme.Core do
   def simulate(size, ths \\ [], ts \\ []) do
     ts = simulate_collect_time(ts)
     receive do
-      :finish -> simulate_terminate(size - length(ths))
+      :finish -> simulate_terminate(size, ths)
       {:time, t} ->
         simulate(size, ths, Enum.uniq([t|ts]) |> Enum.sort)
       {:active, pids} ->
@@ -224,7 +224,7 @@ defmodule Systeme.Core do
         if length(ths) == size do
           if length(ts) > 0 do
             receive do
-              :finish -> simulate_terminate(size - length(ths))
+              :finish -> simulate_terminate(size, ths)
               {:time, t} ->
                 simulate(size, ths, Enum.uniq([t|ts]) |> Enum.sort)
               {:active, pid} ->
@@ -256,21 +256,31 @@ defmodule Systeme.Core do
     end
   end
 
-  defp simulate_terminate(size) do
-    if size == 0 do
-      send(:systeme_main_thread, :finished)
-      exit(:normal)
-    end
+  defp simulate_terminate(size, ths) do
     receive do
       {:inactive, pid} ->
-        send(pid, :finish)
-        simulate_terminate(size)
-      :finished -> simulate_terminate(size - 1)
-      _ -> simulate_terminate(size)
+        ths = Enum.uniq([pid | ths])
+        if length(ths) == size do
+          Enum.each(ths, fn(th)-> send(th, :finish) end)
+          threads_terminate(size)
+          send(:systeme_main_thread, :finished)
+          exit(:normal)
+        else
+          simulate_terminate(size, ths)
+        end
+      _ -> simulate_terminate(size, ths)
     #after 10 ->
     #  send(:systeme_main_thread, :finished)
     #  exit(:abnormal)
     end
+  end
+
+  defp threads_terminate(size) when size > 0 do
+    receive do
+      :finished -> threads_terminate(size - 1)
+    end
+  end
+  defp threads_terminate(0) do
   end
 
   #defp all_threads_waiting?(ths) do
