@@ -73,6 +73,7 @@ defmodule Systeme.Core do
           Systeme.Core.set_current_time()
           Systeme.Core.active_thread()
           unquote(body)
+    #      set_current_time(nil)
           Systeme.Core.inactive_thread()
           receive do
             :finish ->
@@ -147,7 +148,7 @@ defmodule Systeme.Core do
     after 0 ->
       receive do
         {e, t} ->
-          if Enum.find(es, fn(ne) -> ne == e end) do
+          if Enum.find(es, fn(ne) -> ne == e and t >= current_time() end) do
             if t > current_time() do
               set_current_time(t)
             end
@@ -238,8 +239,13 @@ defmodule Systeme.Core do
             after 0 ->
               #if all_threads_waiting?(ths) do
                 #ct = Enum.reduce(ths, nil, fn({_, t}, acc)->
-                #  if acc == nil or t < acc, do: t, else: acc
+                #  if t == nil do
+                #    acc
+                #  else
+                #    if acc == nil or t < acc, do: t, else: acc
+                #  end
                 #end)
+                #IO.puts ct
                 #Systeme.Signal.remove_old_signals(ct)
                 simulate(size, ths, notify_time(ts))
               #else
