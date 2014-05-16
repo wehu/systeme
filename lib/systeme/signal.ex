@@ -16,13 +16,13 @@ defmodule Systeme.Signals do
     :ets.insert(:systeme_signals, {{name, ct}, value})
   end
 
-  #def remove_old_signals(ct) do
-  #  :ets.match(:systeme_signals, :'$1') |>
-  #  Enum.each(fn([k = {_, t}])->
-  #    if t <= ct do
-  #      :ets.delete(:systeme_signals, k)
-  #    end
-  #  end)
-  #end
+  def remove_old_signals(ct) do
+    :ets.match(:systeme_signals, {:'$1', :'_'}) |>
+    Enum.each(fn([k = {_, t}])->
+      if t < ct do
+        :ets.delete(:systeme_signals, k)
+      end
+    end)
+  end
 
 end

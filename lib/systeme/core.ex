@@ -233,6 +233,10 @@ defmodule Systeme.Core do
             after 0 ->
               #if all_threads_waiting?(ths) do
                 simulate(size, ths, notify_time(ts))
+                #ct = Enum.reduce(ths, nil, fn(pid, acc)->
+                #  if acc == nil or pid < acc, do: pid, else: acc
+                #end)
+                #Systeme.Signal.remove_old_signals(ct)
               #else
               #  simulate(size, ths, ts)
               #end
@@ -269,8 +273,8 @@ defmodule Systeme.Core do
           simulate_terminate(size, ths)
         end
       _ -> simulate_terminate(size, ths)
-    #after 10 ->
-    #  send(:systeme_main_thread, :finished)
+   after 5 ->
+      send(:systeme_main_thread, :finished)
     #  exit(:abnormal)
     end
   end
