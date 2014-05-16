@@ -3,26 +3,27 @@ defmodule SystemeTest do
   use Systeme.Core
 
   initial do
+   write_signal(:clk, 0)
    info "a"
   end
   initial do
+   write_signal(:aaa, 1)
    info "b"
    wait(time(1))
    info "c"
-   write_signal(:aaa, 1)
    info read_signal(:aaa)
    wait(time(100))
    finish()
   end
 
   always(time(1)) do
-    notify(event(:a))
-    info "aaa"
+    clk = read_signal(:clk)
+    write_signal(:clk, (if clk == 1, do: 0, else: 1))
   end
 
-  Enum.each(1..100, fn(_) ->
-  always(event(:a)) do
-    info "bbb"
+  Enum.each(1..3, fn(_) ->
+  always(signal(:clk)) do
+    info read_signal(:clk)
   end
   end)
 

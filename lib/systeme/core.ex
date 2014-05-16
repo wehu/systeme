@@ -205,38 +205,43 @@ defmodule Systeme.Core do
     spawn_link(__MODULE__, :simulate, [size]) |> Process.register(:systeme_simulate_thread)
   end
 
-  def simulate(size, ths \\ [], ts \\ []) do
+  def simulate(size, ths \\ HashDict.new(), ts \\ HashDict.new()) do
     ts = simulate_collect_time(ts)
     receive do
       :finish -> simulate_terminate(size, ths)
       {:time, t} ->
-        simulate(size, ths, Enum.uniq([t|ts]) |> Enum.sort)
+        simulate(size, ths, Dict.put(ts, t, t))
       {:active, pids} ->
         if !is_list(pids) do
           pids = [pids]
         end
         ths = Enum.reduce(pids, ths, fn(pid, acc) ->
-          List.delete(acc, pid)
+          Dict.delete(ths, pid)
         end)
         simulate(size, ths, ts)
-      {:inactive, pid} ->
-        ths = Enum.uniq([pid | ths])
-        if length(ths) == size do
-          if length(ts) > 0 do
+      {:inactive, pid, t} ->
+        ths = Dict.put(ths, pid, t)
+        if Dict.size(ths) == size do
+          if Dict.size(ts) > 0 do
             receive do
               :finish -> simulate_terminate(size, ths)
               {:time, t} ->
-                simulate(size, ths, Enum.uniq([t|ts]) |> Enum.sort)
-              {:active, pid} ->
-                ths = List.delete(ths, pid)
+                simulate(size, ths, Dict.put(ts, t, t))
+              {:active, pids} ->
+                if !is_list(pids) do
+                  pids = [pids]
+                end
+                ths = Enum.reduce(pids, ths, fn(pid, acc) ->
+                  Dict.delete(ths, pid)
+                end)
                 simulate(size, ths, ts)
             after 0 ->
               #if all_threads_waiting?(ths) do
-                simulate(size, ths, notify_time(ts))
-                #ct = Enum.reduce(ths, nil, fn(pid, acc)->
-                #  if acc == nil or pid < acc, do: pid, else: acc
+                #ct = Enum.reduce(ths, nil, fn({_, t}, acc)->
+                #  if acc == nil or t < acc, do: t, else: acc
                 #end)
                 #Systeme.Signal.remove_old_signals(ct)
+                simulate(size, ths, notify_time(ts))
               #else
               #  simulate(size, ths, ts)
               #end
@@ -254,7 +259,7 @@ defmodule Systeme.Core do
   defp simulate_collect_time(ts) do
     receive do
       {:time, t} ->
-        simulate_collect_time(Enum.uniq([t|ts]) |> Enum.sort)
+        simulate_collect_time(Dict.put(ts, t, t))
     after 0 ->
       ts
     end
@@ -262,10 +267,10 @@ defmodule Systeme.Core do
 
   defp simulate_terminate(size, ths) do
     receive do
-      {:inactive, pid} ->
-        ths = Enum.uniq([pid | ths])
-        if length(ths) == size do
-          Enum.each(ths, fn(th)-> send(th, :finish) end)
+      {:inactive, pid, t} ->
+        ths = Dict.put(ths, pid, t)
+        if Dict.size(ths) == size do
+          Enum.each(Dict.keys(ths), fn(th)-> send(th, :finish) end)
           threads_terminate(size)
           send(:systeme_main_thread, :finished)
           exit(:normal)
@@ -281,6 +286,7 @@ defmodule Systeme.Core do
 
   defp threads_terminate(size) when size > 0 do
     receive do
+
       :finished -> threads_terminate(size - 1)
     end
   end
@@ -299,7 +305,8 @@ defmodule Systeme.Core do
   end
 
   defp notify_time(ts) do
-    [t|ts] = ts
+    t = Dict.keys(ts) |> Enum.sort |> List.first
+    ts = Dict.delete(ts, t)
     set_current_time(t)
     notify({:time, t})
     ts
@@ -326,7 +333,7 @@ defmodule Systeme.Core do
   end
 
   def inactive_thread() do
-    send(:systeme_simulate_thread, {:inactive, self})
+    send(:systeme_simulate_thread, {:inactive, self, current_time()})
   end
 
   def run_initial() do
