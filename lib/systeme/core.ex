@@ -309,6 +309,18 @@ defmodule Systeme.Core do
     IO.puts "[SE #{current_time()} I]: #{msg}"
   end
 
+  def warn(msg) do
+    IO.puts "[SE #{current_time()} W]: #{msg}"
+  end
+
+  def debug(msg) do
+    IO.puts "[SE #{current_time()} D]: #{msg}"
+  end
+
+  def error(msg) do
+    IO.puts "[SE #{current_time()} E]: #{msg}"
+  end
+
   def active_thread() do
     send(:systeme_simulate_thread, {:active, self})
   end
