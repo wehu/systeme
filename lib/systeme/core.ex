@@ -129,7 +129,7 @@ defmodule Systeme.Core do
        :gproc.reg({:p, :l, e})
     end)
     inactive_thread()
-    wait_loop(es)
+    wait_loop(es, current_time())
     Enum.each(es, fn(e) ->
        :gproc.unreg({:p, :l, e})
     end)
@@ -140,7 +140,7 @@ defmodule Systeme.Core do
     wait([e])
   end
 
-  defp wait_loop(es) do
+  defp wait_loop(es, ct) do
     receive do
       :finish ->
          send(:systeme_simulate_thread, :finished)
@@ -148,12 +148,12 @@ defmodule Systeme.Core do
     after 0 ->
       receive do
         {e, t} ->
-          if Enum.find(es, fn(ne) -> ne == e and t >= current_time() end) do
-            if t > current_time() do
+          if Enum.find(es, fn(ne) -> ne == e and t >= ct end) do
+            if t > ct do
               set_current_time(t)
             end
           else
-            wait_loop(es)
+            wait_loop(es, ct)
           end
         :finish ->
           send(:systeme_simulate_thread, :finished)
@@ -162,9 +162,9 @@ defmodule Systeme.Core do
     end
   end
 
-  defp wait_flush(t) do
+  defp wait_flush(ct) do
     receive do
-      {_, nt} -> if nt <= t, do: wait_flush(t)
+      {_, t} -> if t <= ct, do: wait_flush(ct)
     after 0 ->
     end
   end
