@@ -142,9 +142,14 @@ defmodule Systeme.Core do
 
   defp wait_loop(es, ct) do
     receive do
-      :finish ->
-         send(:systeme_simulate_thread, :finished)
-         exit(:normal)
+      {e, t} ->
+        if Enum.find(es, fn(ne) -> ne == e and t >= ct end) do
+          if t > ct do
+            set_current_time(t)
+          end
+        else
+          wait_loop(es, ct)
+        end
     after 0 ->
       receive do
         {e, t} ->
@@ -284,8 +289,8 @@ defmodule Systeme.Core do
           simulate_terminate(size, ths)
         end
       _ -> simulate_terminate(size, ths)
-   after 5 ->
-      send(:systeme_main_thread, :finished)
+   #after 5 ->
+   #   send(:systeme_main_thread, :finished)
     #  exit(:abnormal)
     end
   end

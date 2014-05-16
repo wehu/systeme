@@ -19,11 +19,15 @@ defmodule SystemeTest do
   always(time(1)) do
     clk = read_signal(:clk)
     write_signal(:clk, (if clk == 1, do: 0, else: 1))
+    notify(event(:aaa))
   end
 
   Enum.each(1..3, fn(_) ->
   always(signal(:clk)) do
     info read_signal(:clk)
+  end
+  always(event(:aaa)) do
+    info "bbb"
   end
   end)
 
