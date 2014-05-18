@@ -227,7 +227,7 @@ defmodule Systeme.Core do
       {:inactive, pid, t} ->
         ths = Dict.put(ths, pid, t)
         if Dict.size(ths) == size do
-          if Dict.size(ts) > 0 do
+          if Dict.size(ts) > 0 and all_threads_waiting?(ths) do
             receive do
               :finish -> simulate_terminate(size, ths)
               {:time, t} ->
@@ -241,11 +241,7 @@ defmodule Systeme.Core do
                 end)
                 simulate(size, ths, ts)
             after 0 ->
-              #if all_threads_waiting?(ths) do
-                simulate(size, ths, notify_time(ts))
-              #else
-              #  simulate(size, ths, ts)
-              #end
+              simulate(size, ths, notify_time(ts))
             end
           else
             simulate(size, ths, ts)
@@ -294,12 +290,12 @@ defmodule Systeme.Core do
   defp threads_terminate(0) do
   end
 
-  #defp all_threads_waiting?(ths) do
-  #  Enum.reduce(ths, true, fn(th, acc)->
-  #    {_, stat} = :erlang.process_info(th, :status)
-  #    if stat != :waiting, do: false, else: acc
-  #  end)
-  #end
+  defp all_threads_waiting?(ths) do
+    Enum.reduce(Dict.keys(ths), true, fn(th, acc)->
+      {_, stat} = :erlang.process_info(th, :status)
+      if stat != :waiting, do: false, else: acc
+    end)
+  end
 
   defp add_time(t) do
     send(:systeme_simulate_thread, {:time, t})

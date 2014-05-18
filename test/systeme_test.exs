@@ -12,7 +12,7 @@ defmodule SystemeTest do
    wait(time(1))
    info "c"
    info read_signal(:aaa)
-   wait(time(100))
+   wait(time(50))
    finish()
   end
 
@@ -22,7 +22,7 @@ defmodule SystemeTest do
     notify(event(:aaa))
   end
 
-  Enum.each(1..3, fn(_) ->
+  Enum.each(1..10, fn(_) ->
   always(signal(:clk)) do
     info read_signal(:clk)
   end
