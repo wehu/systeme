@@ -1,6 +1,6 @@
 defmodule Systeme.Core do
 
-  require Systeme.Signals
+  require Systeme.Signal
 
   defmacro __using__(_) do
     quote do
@@ -68,17 +68,16 @@ defmodule Systeme.Core do
     quote bind_quoted: binding do
       id = length(Module.get_attribute(__MODULE__, :systeme_threads))
       n = :"systeme_thread__initial_#{id}"
-      def unquote(n)() do
+      def unquote(n)(name, master_pid) do
         spawn_link(fn ->
-          Systeme.Core.set_current_time()
-          Systeme.Core.active_thread()
-          unquote(body)
-          Systeme.Core.inactive_thread()
+          Process.put(:systeme_thread_name, name)
           receive do
-            :finish ->
-              send(:systeme_simulate_thread, :finished)
-              exit(:normal)
+            {:pids, pids} -> Process.put(:systeme_pids, pids)
           end
+          Systeme.Core.set_current_time(0)
+          unquote(body)
+          send(master_pid, :finished)
+          Systeme.Signal.remove_thread(self)
         end)
       end
     end 
@@ -90,22 +89,23 @@ defmodule Systeme.Core do
     quote bind_quoted: binding do
       id = length(Module.get_attribute(__MODULE__, :systeme_threads))
       n = :"systeme_thread__always_#{id}"
-      def unquote(n)() do
+      def unquote(n)(name, master_pid, max_time) do
         f = fn(_f) ->
           Systeme.Core.wait(unquote(es))
           unquote(body)
-          _f.(_f)
+          if Systeme.Core.current_time() <= max_time do
+            _f.(_f)
+          end
         end
         spawn_link(fn ->
-          Systeme.Core.set_current_time()
-          Systeme.Core.active_thread()
-          f.(f)
-          Systeme.Core.inactive_thread()
+          Process.put(:systeme_thread_name, name)
           receive do
-            :finish ->
-              send(:systeme_simulate_thread, :finished)
-              exit(:normal)
+            {:pids, pids} -> Process.put(:systeme_pids, pids)
           end
+          Systeme.Core.set_current_time(0)
+          f.(f)
+          send(master_pid, :finished)
+          Systeme.Signal.remove_thread(self)
         end)
       end
     end
@@ -116,23 +116,39 @@ defmodule Systeme.Core do
   end
 
   def set_current_time(t \\ 0) do
+    ot = current_time()
     Process.put(:sim_time, t)
+    if ot < t do
+      Systeme.Signal.update_thread_time(self, t)
+    end
+  end
+
+  def name() do
+    Process.get(:systeme_thread_name)
   end
 
   def wait(es) when is_list(es) do
-    Enum.each(es, fn(e) ->
-       case e do
-         {:time, t} -> add_time(t)
-         _ ->
-       end
-       :gproc.reg({:p, :l, e})
+    #Enum.each(es, fn(e) ->
+    #  :gproc.reg({:p, :l, e})
+    #end)
+    te = Enum.find(es, fn(e) ->
+      case e do
+        {:time, _} -> true
+        _ -> false
+      end
     end)
-    inactive_thread()
-    wait_loop(es, current_time())
-    Enum.each(es, fn(e) ->
-       :gproc.unreg({:p, :l, e})
-    end)
-    active_thread()
+    if te do
+      if length(es) > 1 do
+        throw("Attempt to mix simultion time with events")
+      end
+      {_, t} = te
+      set_current_time(t)
+    else
+      wait_loop(es, current_time())
+    end
+    #Enum.each(es, fn(e) ->
+    #   :gproc.unreg({:p, :l, e})
+    #end)
     wait_flush(current_time())
   end
   def wait(e) do
@@ -142,40 +158,32 @@ defmodule Systeme.Core do
   defp wait_loop(es, ct) do
     receive do
       {e, t} ->
-        if Enum.find(es, fn(ne) -> ne == e and t >= ct end) do
-          if t > ct do
+        if Enum.find(es, fn(ne) -> ne == e end) do
+          if t >= ct do
             set_current_time(t)
+          else
+            wait_loop(es, ct)
           end
         else
           wait_loop(es, ct)
         end
-    after 0 ->
-      receive do
-        {e, t} ->
-          if Enum.find(es, fn(ne) -> ne == e and t >= ct end) do
-            if t > ct do
-              set_current_time(t)
-            end
-          else
-            wait_loop(es, ct)
-          end
-        :finish ->
-          send(:systeme_simulate_thread, :finished)
-          exit(:normal)
-      end
     end
   end
 
   defp wait_flush(ct) do
     receive do
-      {_, t} -> if t <= ct, do: wait_flush(ct)
+      {_, t} when t <= ct -> wait_flush(ct)
     after 0 ->
     end
   end
 
   def notify(e) do
-    send(:systeme_simulate_thread, {:active, :gproc.lookup_pids({:p, :l, e})})
-    :gproc.send({:p, :l, e}, {e, current_time()})
+    pids = Process.get(:systeme_pids)
+    #send(:systeme_simulate_thread, {:active, pids}) #:gproc.lookup_pids({:p, :l, e})})
+    Enum.each(pids, fn(pid)->
+      send(pid, {e, current_time()})
+    end)
+    #:gproc.send({:p, :l, e}, {e, current_time()})
   end
 
   defmacro event(n) do
@@ -197,178 +205,69 @@ defmodule Systeme.Core do
   end
 
   def read_signal(s) do
-    Systeme.Signals.read(s)
+    Systeme.Signal.read(s)
   end
 
   def write_signal(s, v) do
-    Systeme.Signals.write(s, v)
+    Systeme.Signal.write(s, v)
     notify(signal(s))
   end
 
-  def run_simulate() do
-    size = length(__all_systeme_threads__)
-    spawn_link(__MODULE__, :simulate, [size]) |> Process.register(:systeme_simulate_thread)
-  end
-
-  def simulate(size, ths \\ HashDict.new(), ts \\ HashDict.new()) do
-    ts = simulate_collect_time(ts)
-    receive do
-      :finish -> simulate_terminate(size, ths)
-      {:time, t} ->
-        simulate(size, ths, Dict.put(ts, t, t))
-      {:active, pids} ->
-        if !is_list(pids) do
-          pids = [pids]
-        end
-        ths = Enum.reduce(pids, ths, fn(pid, acc) ->
-          Dict.delete(ths, pid)
-        end)
-        simulate(size, ths, ts)
-      {:inactive, pid, t} ->
-        ths = Dict.put(ths, pid, t)
-        if Dict.size(ths) == size do
-          if Dict.size(ts) > 0 and all_threads_waiting?(ths) do
-            receive do
-              :finish -> simulate_terminate(size, ths)
-              {:time, t} ->
-                simulate(size, ths, Dict.put(ts, t, t))
-              {:active, pids} ->
-                if !is_list(pids) do
-                  pids = [pids]
-                end
-                ths = Enum.reduce(pids, ths, fn(pid, acc) ->
-                  Dict.delete(ths, pid)
-                end)
-                simulate(size, ths, ts)
-            after 0 ->
-              simulate(size, ths, notify_time(ts))
-            end
-          else
-            simulate(size, ths, ts)
-          end
-        else
-          simulate(size, ths, ts)
-        end
-      _ -> exit(:abnormal) #IO.inspect e; simulate(size, ths, ts)
-    end
-  end
-
-  defp simulate_collect_time(ts) do
-    receive do
-      {:time, t} ->
-        simulate_collect_time(Dict.put(ts, t, t))
-    after 0 ->
-      ts
-    end
-  end
-
-  defp simulate_terminate(size, ths) do
-    receive do
-      {:inactive, pid, t} ->
-        ths = Dict.put(ths, pid, t)
-        if Dict.size(ths) == size do
-          Enum.each(Dict.keys(ths), fn(th)-> send(th, :finish) end)
-          threads_terminate(size)
-          send(:systeme_main_thread, :finished)
-          exit(:normal)
-        else
-          simulate_terminate(size, ths)
-        end
-      _ -> simulate_terminate(size, ths)
-   #after 5 ->
-   #   send(:systeme_main_thread, :finished)
-    #  exit(:abnormal)
-    end
-  end
-
-  defp threads_terminate(size) when size > 0 do
-    receive do
-
-      :finished -> threads_terminate(size - 1)
-    end
-  end
-  defp threads_terminate(0) do
-  end
-
-  defp all_threads_waiting?(ths) do
-    Enum.reduce(Dict.keys(ths), true, fn(th, acc)->
-      {_, stat} = :erlang.process_info(th, :status)
-      if stat != :waiting, do: false, else: acc
-    end)
-  end
-
-  defp add_time(t) do
-    send(:systeme_simulate_thread, {:time, t})
-  end
-
-  defp notify_time(ts) do
-    t = Dict.keys(ts) |> Enum.sort |> List.first
-    ts = Dict.delete(ts, t)
-    set_current_time(t)
-    notify({:time, t})
-    ts
-  end
-
   def info(msg) do
-    IO.puts "[SE #{current_time()} I]: #{msg}"
+    IO.puts "[SE #{current_time()} #{name()} I]: #{msg}"
   end
 
   def warn(msg) do
-    IO.puts "[SE #{current_time()} W]: #{msg}"
+    IO.puts "[SE #{current_time()} #{name()} W]: #{msg}"
   end
 
   def debug(msg) do
-    IO.puts "[SE #{current_time()} D]: #{msg}"
+    IO.puts "[SE #{current_time()} #{name()} D]: #{msg}"
   end
 
   def error(msg) do
-    IO.puts "[SE #{current_time()} E]: #{msg}"
-  end
-
-  def active_thread() do
-    send(:systeme_simulate_thread, {:active, self})
-  end
-
-  def inactive_thread() do
-    send(:systeme_simulate_thread, {:inactive, self, current_time()})
+    IO.puts "[SE #{current_time()} #{name()} E]: #{msg}"
   end
 
   def run_initial() do
-    __all_systeme_threads__("initial") |> Enum.each(fn({mod, name}) ->
-      apply(mod, name, [])
+    __all_systeme_threads__("initial") |> Enum.map(fn({mod, name}) ->
+      apply(mod, name, [name, self])
     end)
   end
   
-  def run_always() do
-    __all_systeme_threads__("always") |> Enum.each(fn({mod, name}) ->
-      apply(mod, name, [])
+  def run_always(max_time) do
+    __all_systeme_threads__("always") |> Enum.map(fn({mod, name}) ->
+      apply(mod, name, [name, self, max_time])
     end)
   end
 
-  def run() do
+  defp threads_terminated(size) when size > 0 do
+    receive do
+      :finished -> threads_terminated(size - 1)
+    end
+  end
+  defp threads_terminated(0) do
+  end
+
+  def run(max_time) do
     IO.puts "Systeme simulator start"
-    Process.register(self, :systeme_main_thread)
-    Systeme.Signals.start()
-    :application.start(:gproc)
-    run_simulate()
-    run_initial()
-    run_always()
-    receive do
-      :finish -> send(:systeme_simulate_thread, :finish)
-    end
-    receive do
-      :finished -> 
-    end
+    Systeme.Signal.start()
+    #:application.start(:gproc)
+    initials = run_initial()
+    always   = run_always(max_time)
+    pids = initials ++ always
+    Systeme.Signal.start_trace_signals(pids)
+    Enum.each(pids, fn(pid) ->
+      send(pid, {:pids, pids})
+    end)
+    threads_terminated(length(pids))
+    Systeme.Signal.finish()
     IO.puts "Simulation finished"
   end
 
   def start_link() do
-    pid = spawn_link(&run/0)
+    pid = spawn_link(__MODULE__, :run, [100])
     {:ok, pid}
-  end
-
-  def finish() do
-    send(:systeme_main_thread, :finish)
   end
 
 end
