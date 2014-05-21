@@ -226,10 +226,10 @@ defmodule Systeme.Core do
     e
   end
 
-  defp wait_loop(es, ct) do
+  defp wait_loop(es, ct, mq \\ []) do
     receive do
       m = {e, t, _} ->
-        send(self, m)
+        mq = [m|mq]
         if Dict.has_key?(es, e) do
           {et, ee} = Dict.get(es, e)
           if !ee && t >= ct && et <= t do
@@ -237,16 +237,20 @@ defmodule Systeme.Core do
             {_, r, t} = get_recent_event(es)
             if r do
               set_current_time(t)
+              Enum.each(Enum.reverse(mq), fn(m)->
+                send(self, m)
+              end)
             else
-              wait_loop(es, ct)
+              wait_loop(es, ct, mq)
             end
           else
-            wait_loop(es, ct)
+            wait_loop(es, ct, mq)
           end
         else
-          wait_loop(es, ct)
+          wait_loop(es, ct, mq)
         end
       m = {e, t} ->
+        mq = [m|mq]
         if Dict.has_key?(es, e) do
           {_, ee} = Dict.get(es, e)
           if !ee && t >= ct do
@@ -254,23 +258,26 @@ defmodule Systeme.Core do
             {_, r, t} = get_recent_event(es)
             if r do
               set_current_time(t)
+              Enum.each(Enum.reverse(mq), fn(m)->
+                send(self, m)
+              end)
             else
-              send(self, m)
-              wait_loop(es, ct)
+              wait_loop(es, ct, mq)
             end
           else
             send(self, m)
-            wait_loop(es, ct)
+            wait_loop(es, ct, mq)
           end
         else
           send(self, m)
-          wait_loop(es, ct)
+          wait_loop(es, ct, mq)
         end
     end
   end
 
   defp wait_flush(ct) do
     receive do
+      {_, t, _} when t <= ct -> wait_flush(ct)
       {_, t} when t <= ct -> wait_flush(ct)
     after 0 ->
     end

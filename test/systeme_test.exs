@@ -26,12 +26,14 @@ defmodule SystemeTest do
     end
   end
 
+  Enum.each(1..1, fn(_)->
   always(signal(:clk)) do
     info read_signal(:clk)
   end
   always(event(:aaa)) do
     info "aaa"
   end
+  end)
   always([event(:ccc)], [event(:aaa), event(:bbb)]) do
     info "bbb"
     wait(time(2))
