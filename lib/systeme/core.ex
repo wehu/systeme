@@ -300,7 +300,15 @@ defmodule Systeme.Core do
       {e, t, v, _} when t <= ct ->
         case e do
           {:signal, s} ->
-            Process.put(:systeme_signals, (Process.get(:systeme_signals) |> Dict.put(s, v)))
+            vt = Process.get(:systeme_signals) |> Dict.get(s)
+            if vt do
+              {_, ot} = vt
+              if ot <= t do
+                Process.put(:systeme_signals, (Process.get(:systeme_signals) |> Dict.put(s, {v, t})))
+              end
+            else
+              Process.put(:systeme_signals, (Process.get(:systeme_signals) |> Dict.put(s, {v, t})))
+            end
           _ ->
         end
         wait_flush(ct)
@@ -332,19 +340,25 @@ defmodule Systeme.Core do
 
   defmacro time(n) do
     quote do
-      {:time,  unquote(n)}
+      {:time, unquote(n)}
     end
   end
 
   def read_signal(s, dv \\ nil) do
     systeme_check_event_receiver(signal(s))
     systeme_check_event_driver(signal(s))
-    v = (Process.get(:systeme_signals) |> Dict.get(s)) || dv
+    v = (Process.get(:systeme_signals) |> Dict.get(s))
     if v do
+      {v, _} = v
       v
     else
-      wait(signal(s))
-      Process.get(:systeme_signals) |> Dict.get(s)
+      if dv do
+        dv
+      else
+        wait(signal(s))
+        {v, _} = Process.get(:systeme_signals) |> Dict.get(s)
+        v
+      end
     end
   end
 
