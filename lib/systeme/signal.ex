@@ -60,11 +60,26 @@ defmodule Systeme.Signal do
   end
 
   defp remove_old_signals(mt) do
-    :ets.match(:systeme_signals, {:'$1', :'_'}) |>
-    Enum.each(fn([k = {_, t}])->
+    rsv = :ets.match(:systeme_signals, {:'$1', :'$2'}) |>
+    Enum.reduce(HashDict.new, fn([k = {s, t}, v], acc)->
       if t < mt do
         :ets.delete(:systeme_signals, k)
+        case Dict.get(acc, s) do
+          {ot, _} -> 
+            if ot < t do
+              Dict.put(acc, s, {t, v})
+            else
+              acc
+            end
+          _ -> Dict.put(acc, s, {t, v})
+        end
+      else
+        acc
       end
+    end)
+    Enum.each(Dict.keys(rsv), fn(s)->
+      {t, v} = Dict.get(rsv, s)
+      :ets.insert(:systeme_signals, {{s, t}, v})
     end)
   end
 

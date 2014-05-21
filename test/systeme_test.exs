@@ -2,21 +2,24 @@ defmodule SystemeTest do
   use ExUnit.Case
   use Systeme.Core
 
-  initial do
-   write_signal(:clk, 0)
+  initial([signal(:bbb)]) do
+   write_signal(:bbb, 0)
    info "a"
+   wait(time(2))
+   write_signal(:bbb, 1)
   end
-  initial do
+  initial(signal(:aaa)) do
    write_signal(:aaa, 1)
    info "b"
    wait(time(1))
    info "c"
    info read_signal(:aaa)
    wait(time(10))
+   #finish()
   end
 
-  always(time(1)) do
-    clk = read_signal(:clk)
+  always([signal(:clk), event(:aaa), event(:bbb)], time(1)) do
+    clk = read_signal(:clk, 0)
     write_signal(:clk, (if clk == 1, do: 0, else: 1))
     notify(event(:aaa))
     if clk == 0 do
@@ -24,26 +27,31 @@ defmodule SystemeTest do
     end
   end
 
-  Enum.each(1..3, fn(_) ->
-    always(signal(:clk)) do
+  Enum.each(1..1, fn(_) ->
+    always([], signal(:clk)) do
       info read_signal(:clk)
     end
-    always(event(:aaa)) do
+    always([], event(:aaa)) do
       info "aaa"
     end
-    always(event(:bbb)) do
+    always([event(:ccc)], event(:bbb)) do
       info "bbb"
       wait(time(2))
       notify(event(:ccc))
     end
-    always(event(:ccc)) do
+    always([], event(:ccc)) do
       info "ccc"
     end
   end)
 
-  #always(signal(:aaa)) do
-  #  info read_signal(:aaa)
-  #end
+  always([], signal(:aaa)) do
+    info "aaaaa"
+    info read_signal(:aaa)
+  end
+  always([], [signal(:bbb), signal(:aaa)]) do
+    info "bbbbb"
+    info read_signal(:aaa)
+  end
 
   test "the truth" do
     run(100)
