@@ -1,6 +1,5 @@
 defmodule Systeme.Core do
 
-  require Systeme.Signal
   require Systeme.Event
 
   defmacro __using__(_) do
@@ -64,33 +63,56 @@ defmodule Systeme.Core do
   defp is_systeme_thread_name?('systeme_thread__' ++ _), do: true
   defp is_systeme_thread_name?(_), do: false
 
-  defp systeme_set_event_owner(e, pid) do
+  defp systeme_set_event_driver(e, pid) do
     #systeme_check_event_drivers(e, pid)
-    Systeme.Event.register(e, pid)
+    Systeme.Event.register_driver(e, pid)
   end
-  defp systeme_get_event_owner(e) do
-    Systeme.Event.get_owner(e)
+  defp systeme_set_event_receiver(e, pid) do
+    #systeme_check_event_drivers(e, pid)
+    Systeme.Event.register_receiver(e, pid)
   end
-  defp systeme_check_event_owner(e) do
-    pid = systeme_get_event_owner(e)
+  defp systeme_get_event_driver(e) do
+    Systeme.Event.get_driver(e)
+  end
+  defp systeme_get_event_receivers(e) do
+    Systeme.Event.get_receivers(e)
+  end
+  defp systeme_check_event_driver(e) do
+    pid = systeme_get_event_driver(e)
     unless pid do
-      throw("Event #{inspect(e)} has no owner")
+      throw("Event #{inspect(e)} has no driver")
+    end
+  end
+  defp systeme_check_event_receiver(e) do
+    unless Enum.find(Process.get(:systeme_thread_inputs), fn(ne) -> e == ne end) do
+      throw("Event #{inspect(e)} is not a receiver of current thread")
     end
   end
   defp systeme_check_event_drivers(e, pid) do
-    systeme_check_event_owner(e)
-    opid = systeme_get_event_owner(e)
+    systeme_check_event_driver(e)
+    opid = systeme_get_event_driver(e)
     if opid != pid do
-      throw("Attempt to set multi-owners for event #{inspect(e)}: #{inspect(opid)} and #{inspect(pid)}")
+      throw("Attempt to set multi-drivers for event #{inspect(e)}: #{inspect(opid)} and #{inspect(pid)}")
     end
   end
 
   def __systeme_thread_setup__(es, name, max_time) do
-    es = if is_list(es), do: es, else: [es]
-    Enum.each(es, fn(e)->
-      systeme_set_event_owner(e, self)
+    oes = Keyword.get(es, :output, [])
+    oes = if is_list(oes), do: oes, else: [oes]
+    Enum.each(oes, fn(e)->
+      systeme_set_event_driver(e, self)
     end)
-    Process.put(:systeme_thread_events, es)
+    ies = Keyword.get(es, :input, [])
+    ies = if is_list(ies), do: ies, else: [ies]
+    nes = Keyword.get(es, :on, [])
+    nes = if is_list(nes), do: nes, else: [nes]
+    ies = oes ++ ies ++ nes |> Enum.uniq
+    Enum.each(ies, fn(e)->
+      systeme_set_event_receiver(e, self)
+    end)
+    Process.put(:systeme_thread_outputs, oes)
+    Process.put(:systeme_thread_inputs, ies)
+    Process.put(:systeme_signals, HashDict.new)
     Process.put(:systeme_thread_name, name)
     Process.put(:systeme_thread_max_time, max_time)
     receive do
@@ -104,28 +126,27 @@ defmodule Systeme.Core do
   end
 
   def __systeme_thread_cleanup__() do
-    Process.get(:systeme_pids) |> Enum.each(fn(pid)->
-      Process.get(:systeme_thread_events) |> Enum.each(fn(e)->
+    Process.get(:systeme_thread_outputs) |> Enum.each(fn(e)->
+      systeme_get_event_receivers(e) |> Enum.each(fn(pid) ->
         send(pid, {e, Process.get(:systeme_thread_max_time), nil})
       end)
     end)
     send(:systeme_master, :finished)
-    Systeme.Signal.remove_thread(self)
     receive do
       :finished_ok ->
     end
     exit(:normal)
   end
 
-  defmacro initial(ees \\ [], do: body) do
-    ees = Macro.escape(ees)
+  defmacro initial(es \\ [], do: body) do
+    es = Macro.escape(es)
     body = Macro.escape(body)
     quote bind_quoted: binding do
       id = length(Module.get_attribute(__MODULE__, :systeme_threads))
       n = :"systeme_thread__initial_#{id}"
       def unquote(n)(name, max_time) do
         spawn_link(fn ->
-          Systeme.Core.__systeme_thread_setup__(unquote(ees), name, max_time)
+          Systeme.Core.__systeme_thread_setup__(unquote(es), name, max_time)
           unquote(body)
           Systeme.Core.__systeme_thread_cleanup__()
         end)
@@ -133,23 +154,23 @@ defmodule Systeme.Core do
     end 
   end
 
-  defmacro always(ees \\ [], es, do: body) do
+  defmacro always(es \\ [], do: body) do
     body = Macro.escape(body)
     es = Macro.escape(es)
-    ees = Macro.escape(ees)
     quote bind_quoted: binding do
       id = length(Module.get_attribute(__MODULE__, :systeme_threads))
       n = :"systeme_thread__always_#{id}"
       def unquote(n)(name, max_time) do
+        nes = Keyword.get(unquote(es), :on, [])
         f = fn(_f) ->
-          Systeme.Core.wait(unquote(es))
+          Systeme.Core.wait(nes)
           unquote(body)
           if Systeme.Core.current_time() < max_time do
             _f.(_f)
           end
         end
         spawn_link(fn ->
-          Systeme.Core.__systeme_thread_setup__(unquote(ees), name, max_time)
+          Systeme.Core.__systeme_thread_setup__(unquote(es), name, max_time)
           f.(f)
           Systeme.Core.__systeme_thread_cleanup__()
         end)
@@ -164,9 +185,6 @@ defmodule Systeme.Core do
   def set_current_time(t \\ 0) do
     ot = current_time()
     Process.put(:sim_time, t)
-    if ot < t do
-      Systeme.Signal.update_thread_time(self, t)
-    end
   end
 
   def name() do
@@ -188,12 +206,15 @@ defmodule Systeme.Core do
         throw("Attempt to mix simulte time with other events")
       end
       {_, t} = te
-      set_current_time(t)
+      set_current_time(current_time() + t)
     else
       Enum.each(es, fn(e)->
-        systeme_check_event_owner(e)
-        Process.get(:systeme_pids) |> Enum.each(fn(pid)->
-          send(pid, {e, current_time(), nil})
+        systeme_check_event_driver(e)
+        systeme_check_event_receiver(e)
+        Process.get(:systeme_thread_outputs) |> Enum.each(fn(e)->
+          systeme_get_event_receivers(e) |> Enum.each(fn(pid) ->
+            send(pid, {e, current_time(), nil})
+          end)
         end)
       end)
       es = Enum.reduce(es, HashDict.new, fn(e, acc)->
@@ -249,7 +270,7 @@ defmodule Systeme.Core do
         else
           wait_loop(es, ct, mq)
         end
-      m = {e, t} ->
+      m = {e, t, _, _} ->
         mq = [m|mq]
         if Dict.has_key?(es, e) do
           {_, ee} = Dict.get(es, e)
@@ -276,17 +297,23 @@ defmodule Systeme.Core do
   defp wait_flush(ct) do
     receive do
       {_, t, _} when t <= ct -> wait_flush(ct)
-      {_, t} when t <= ct -> wait_flush(ct)
+      {e, t, v, _} when t <= ct ->
+        case e do
+          {:signal, s} ->
+            Process.put(:systeme_signals, (Process.get(:systeme_signals) |> Dict.put(s, v)))
+          _ ->
+        end
+        wait_flush(ct)
     after 0 ->
     end
   end
 
-  def notify(e) do
+  def notify(e, v \\ nil) do
     systeme_check_event_drivers(e, self)
-    pids = Process.get(:systeme_pids)
+    pids = systeme_get_event_receivers(e)
     #send(:systeme_simulate_thread, {:active, pids}) #:gproc.lookup_pids({:p, :l, e})})
     Enum.each(pids, fn(pid)->
-      send(pid, {e, current_time()})
+      send(pid, {e, current_time(), v, nil})
     end)
     #:gproc.send({:p, :l, e}, {e, current_time()})
   end
@@ -305,27 +332,24 @@ defmodule Systeme.Core do
 
   defmacro time(n) do
     quote do
-      {:time, current_time() + unquote(n)}
+      {:time,  unquote(n)}
     end
   end
 
   def read_signal(s, dv \\ nil) do
-    v = Systeme.Signal.read(s) || dv
+    systeme_check_event_receiver(signal(s))
+    systeme_check_event_driver(signal(s))
+    v = (Process.get(:systeme_signals) |> Dict.get(s)) || dv
     if v do
       v
     else
-      ct = current_time()
-      systeme_check_event_owner(signal(s))
-      receive do
-        {{:signal, ^s}, t} when t <= ct ->
-      end
-      Systeme.Signal.read(s) 
+      wait(signal(s))
+      Process.get(:systeme_signals) |> Dict.get(s)
     end
   end
 
   def write_signal(s, v) do
-    Systeme.Signal.write(s, v)
-    notify(signal(s))
+    notify(signal(s), v)
   end
 
   def info(msg) do
@@ -375,13 +399,11 @@ defmodule Systeme.Core do
   def run(max_time) do
     IO.puts "Systeme simulator start"
     Process.register(self, :systeme_master)
-    Systeme.Signal.start()
     Systeme.Event.start()
     #:application.start(:gproc)
     initials = run_initial(max_time)
     always   = run_always(max_time)
     pids = initials ++ always
-    Systeme.Signal.start_trace_signals(pids)
     Enum.each(pids, fn(pid) ->
       send(pid, {:pids, pids})
     end)
@@ -390,7 +412,6 @@ defmodule Systeme.Core do
       send(pid, :go)
     end)
     threads_terminated(length(pids))
-    Systeme.Signal.finish()
     Enum.each(pids, fn(pid) ->
       send(pid, :finished_ok)
     end)
