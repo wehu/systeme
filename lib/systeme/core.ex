@@ -204,7 +204,7 @@ defmodule Systeme.Core do
     #Enum.each(es, fn(e) ->
     #   :gproc.unreg({:p, :l, e})
     #end)
-    wait_flush(es, current_time())
+    wait_flush(current_time())
   end
   def wait(e) do
     wait([e])
@@ -269,9 +269,9 @@ defmodule Systeme.Core do
     end
   end
 
-  defp wait_flush(es, ct) do
+  defp wait_flush(ct) do
     receive do
-      {_, t} when t <= ct -> wait_flush(es, ct)
+      {_, t} when t <= ct -> wait_flush(ct)
     after 0 ->
     end
   end
@@ -324,7 +324,7 @@ defmodule Systeme.Core do
   end
 
   def info(msg) do
-    IO.puts "[SE #{current_time()} #{name()} I]: #{msg}"
+    IO.puts "[SE #{current_time()} I]: #{msg}"
   end
 
   def warn(msg) do
