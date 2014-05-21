@@ -98,7 +98,7 @@ defmodule Systeme.Core do
 
   def __systeme_thread_setup__(es, name, max_time) do
     oes = Keyword.get(es, :output, [])
-    oes = if is_list(oes), do: oes, else: [oes]
+    oes = if is_list(oes), do: oes, else: [oes] |> Enum.uniq
     Enum.each(oes, fn(e)->
       systeme_set_event_driver(e, self)
     end)
