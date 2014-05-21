@@ -15,7 +15,6 @@ defmodule SystemeTest do
    info "c"
    info read_signal(:aaa)
    wait(time(10))
-   #finish()
   end
 
   always([signal(:clk), event(:aaa), event(:bbb)], time(1)) do
@@ -27,28 +26,26 @@ defmodule SystemeTest do
     end
   end
 
-  Enum.each(1..1, fn(_) ->
-    always([], signal(:clk)) do
-      info read_signal(:clk)
-    end
-    always([], event(:aaa)) do
-      info "aaa"
-    end
-    always([event(:ccc)], event(:bbb)) do
-      info "bbb"
-      wait(time(2))
-      notify(event(:ccc))
-    end
-    always([], event(:ccc)) do
-      info "ccc"
-    end
-  end)
+  always(signal(:clk)) do
+    info read_signal(:clk)
+  end
+  always(event(:aaa)) do
+    info "aaa"
+  end
+  always([event(:ccc)], event(:bbb)) do
+    info "bbb"
+    wait(time(2))
+    notify(event(:ccc))
+  end
+  always(event(:ccc)) do
+    info "ccc"
+  end
 
-  always([], signal(:aaa)) do
+  always(signal(:aaa)) do
     info "aaaaa"
     info read_signal(:aaa)
   end
-  always([], [signal(:bbb), signal(:aaa)]) do
+  always([signal(:bbb), signal(:aaa)]) do
     info "bbbbb"
     info read_signal(:aaa)
   end

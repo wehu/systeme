@@ -117,7 +117,7 @@ defmodule Systeme.Core do
     exit(:normal)
   end
 
-  defmacro initial(ees, do: body) do
+  defmacro initial(ees \\ [], do: body) do
     ees = Macro.escape(ees)
     body = Macro.escape(body)
     quote bind_quoted: binding do
@@ -133,7 +133,7 @@ defmodule Systeme.Core do
     end 
   end
 
-  defmacro always(ees, es, do: body) do
+  defmacro always(ees \\ [], es, do: body) do
     body = Macro.escape(body)
     es = Macro.escape(es)
     ees = Macro.escape(ees)
@@ -204,7 +204,7 @@ defmodule Systeme.Core do
     #Enum.each(es, fn(e) ->
     #   :gproc.unreg({:p, :l, e})
     #end)
-    wait_flush(current_time())
+    wait_flush(es, current_time())
   end
   def wait(e) do
     wait([e])
@@ -269,9 +269,9 @@ defmodule Systeme.Core do
     end
   end
 
-  defp wait_flush(ct) do
+  defp wait_flush(es, ct) do
     receive do
-      {_, t} when t <= ct -> wait_flush(ct)
+      {_, t} when t <= ct -> wait_flush(es, ct)
     after 0 ->
     end
   end
