@@ -265,11 +265,9 @@ defmodule Systeme.Core do
               wait_loop(es, ct, mq)
             end
           else
-            send(self, m)
             wait_loop(es, ct, mq)
           end
         else
-          send(self, m)
           wait_loop(es, ct, mq)
         end
     end
