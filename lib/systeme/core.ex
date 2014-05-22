@@ -128,7 +128,7 @@ defmodule Systeme.Core do
   def __systeme_thread_cleanup__() do
     Process.get(:systeme_thread_outputs) |> Enum.each(fn(e)->
       systeme_get_event_receivers(e) |> Enum.each(fn(pid) ->
-        send(pid, {e, Process.get(:systeme_thread_max_time), nil})
+        send(pid, {e, Process.get(:systeme_thread_max_time), nil, false})
       end)
     end)
     send(:systeme_master, :finished)
@@ -213,7 +213,7 @@ defmodule Systeme.Core do
         systeme_check_event_receiver(e)
         Process.get(:systeme_thread_outputs) |> Enum.each(fn(e)->
           systeme_get_event_receivers(e) |> Enum.each(fn(pid) ->
-            send(pid, {e, current_time(), nil})
+            send(pid, {e, current_time(), nil, false})
           end)
         end)
       end)
@@ -249,33 +249,28 @@ defmodule Systeme.Core do
 
   defp wait_loop(es, ct, mq \\ []) do
     receive do
-      m = {e, t, _} ->
+      m = {e, t, _, rm} ->
         mq = [m|mq]
         if Dict.has_key?(es, e) do
-          {et, ee} = Dict.get(es, e)
-          if !ee && t >= ct && et <= t do
-            es = Dict.put(es, e, {t, false})
-            {_, r, t} = get_recent_event(es)
-            if r do
-              set_current_time(t)
-              Enum.each(Enum.reverse(mq), fn(m)->
-                send(self, m)
-              end)
+          if t >= ct do
+            {et, ee} = Dict.get(es, e)
+            es = if ee do
+              if rm && et > t do
+                Dict.put(es, e, {t, true})
+              else
+                es
+              end
             else
-              wait_loop(es, ct, mq)
+              if rm do
+                Dict.put(es, e, {t, true})
+              else
+                if et <= t do
+                  Dict.put(es, e, {t, false})
+                else
+                  es
+                end
+              end
             end
-          else
-            wait_loop(es, ct, mq)
-          end
-        else
-          wait_loop(es, ct, mq)
-        end
-      m = {e, t, _, _} ->
-        mq = [m|mq]
-        if Dict.has_key?(es, e) do
-          {_, ee} = Dict.get(es, e)
-          if !ee && t >= ct do
-            es = Dict.put(es, e, {t, true})
             {_, r, t} = get_recent_event(es)
             if r do
               set_current_time(t)
@@ -296,20 +291,21 @@ defmodule Systeme.Core do
 
   defp wait_flush(ct) do
     receive do
-      {_, t, _} when t <= ct -> wait_flush(ct)
-      {e, t, v, _} when t <= ct ->
-        case e do
-          {:signal, s} ->
-            vt = Process.get(:systeme_signals) |> Dict.get(s)
-            if vt do
-              {_, ot} = vt
-              if ot <= t do
+      {e, t, v, rm} when t <= ct ->
+        if rm do
+          case e do
+            {:signal, s} ->
+              vt = Process.get(:systeme_signals) |> Dict.get(s)
+              if vt do
+                {_, ot} = vt
+                if ot <= t do
+                  Process.put(:systeme_signals, (Process.get(:systeme_signals) |> Dict.put(s, {v, t})))
+                end
+              else
                 Process.put(:systeme_signals, (Process.get(:systeme_signals) |> Dict.put(s, {v, t})))
               end
-            else
-              Process.put(:systeme_signals, (Process.get(:systeme_signals) |> Dict.put(s, {v, t})))
-            end
-          _ ->
+            _ ->
+          end
         end
         wait_flush(ct)
     after 0 ->
@@ -321,7 +317,7 @@ defmodule Systeme.Core do
     pids = systeme_get_event_receivers(e)
     #send(:systeme_simulate_thread, {:active, pids}) #:gproc.lookup_pids({:p, :l, e})})
     Enum.each(pids, fn(pid)->
-      send(pid, {e, current_time(), v, nil})
+      send(pid, {e, current_time(), v, true})
     end)
     #:gproc.send({:p, :l, e}, {e, current_time()})
   end

@@ -26,7 +26,7 @@ defmodule SystemeTest do
     end
   end
 
-  Enum.each(1..100, fn(_)->
+  Enum.each(1..1, fn(_)->
   always(on: signal(:clk)) do
     info read_signal(:clk)
   end
@@ -53,7 +53,7 @@ defmodule SystemeTest do
   end
 
   test "the truth" do
-    run(10000)
+    run(100)
     assert(true)
   end
 end
