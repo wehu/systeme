@@ -65,17 +65,17 @@ defmodule Systeme.Core do
 
   defp systeme_set_event_driver(e, pid) do
     #systeme_check_event_drivers(e, pid)
-    Systeme.Event.register_driver(e, pid)
+    :rpc.call(systeme_master_node(), Systeme.Event, :register_driver, [e, pid])
   end
   defp systeme_set_event_receiver(e, pid) do
     #systeme_check_event_drivers(e, pid)
-    Systeme.Event.register_receiver(e, pid)
+    :rpc.call(systeme_master_node(), Systeme.Event, :register_receiver, [e, pid])
   end
   defp systeme_get_event_driver(e) do
-    Systeme.Event.get_driver(e)
+    :rpc.call(systeme_master_node(), Systeme.Event, :get_driver, [e])
   end
   defp systeme_get_event_receivers(e) do
-    Systeme.Event.get_receivers(e)
+    :rpc.call(systeme_master_node(), Systeme.Event, :get_receivers, [e])
   end
   defp systeme_check_event_driver(e) do
     pid = systeme_get_event_driver(e)
@@ -96,7 +96,14 @@ defmodule Systeme.Core do
     end
   end
 
+  defp systeme_master_node() do
+    Process.get(:systeme_master_node)
+  end
+
   def __systeme_thread_setup__(es, name, max_time) do
+    receive do
+      {:node, n} -> Process.put(:systeme_master_node, n)
+    end
     oes = Keyword.get(es, :output, [])
     oes = if is_list(oes), do: oes, else: [oes] |> Enum.uniq
     Enum.each(oes, fn(e)->
@@ -119,7 +126,7 @@ defmodule Systeme.Core do
       {:pids, pids} -> Process.put(:systeme_pids, pids)
     end
     Systeme.Core.set_current_time(0)
-    send(:systeme_master, :ready)
+    send({:systeme_master, systeme_master_node()}, :ready)
     receive do
       :go ->
     end
@@ -131,7 +138,7 @@ defmodule Systeme.Core do
         send(pid, {e, Process.get(:systeme_thread_max_time), nil, false})
       end)
     end)
-    send(:systeme_master, :finished)
+    send({:systeme_master, systeme_master_node()}, :finished)
     receive do
       :finished_ok ->
     end
@@ -415,6 +422,7 @@ defmodule Systeme.Core do
     always   = run_always(max_time)
     pids = initials ++ always
     Enum.each(pids, fn(pid) ->
+      send(pid, {:node, :erlang.node()})
       send(pid, {:pids, pids})
     end)
     threads_ready(length(pids))
