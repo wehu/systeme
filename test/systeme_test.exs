@@ -17,7 +17,7 @@ defmodule SystemeTest do
    wait(time(10))
   end
 
-  always(on: time(1), output: [signal(:clk), event(:aaa), event(:bbb)]) do
+  always(on: time(3), output: [signal(:clk), event(:aaa), event(:bbb)]) do
     clk = read_signal(:clk, 0)
     write_signal(:clk, (if clk == 1, do: 0, else: 1))
     notify(event(:aaa))

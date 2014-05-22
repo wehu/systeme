@@ -212,7 +212,6 @@ defmodule Systeme.Core do
   end
 
   def set_current_time(t \\ 0) do
-    ot = current_time()
     Process.put(:sim_time, t)
   end
 
