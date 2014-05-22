@@ -173,8 +173,8 @@ defmodule Systeme.Core do
     quote bind_quoted: binding do
       id = length(Module.get_attribute(__MODULE__, :systeme_threads))
       n = :"systeme_thread__initial_#{id}"
-      def unquote(n)(name, max_time) do
-        spawn_link(fn ->
+      def unquote(n)(name, max_time, node) do
+        Node.spawn_link(node, fn ->
           Systeme.Core.__systeme_thread_setup__(unquote(es), name, max_time)
           unquote(body)
           Systeme.Core.__systeme_thread_cleanup__()
@@ -189,7 +189,7 @@ defmodule Systeme.Core do
     quote bind_quoted: binding do
       id = length(Module.get_attribute(__MODULE__, :systeme_threads))
       n = :"systeme_thread__always_#{id}"
-      def unquote(n)(name, max_time) do
+      def unquote(n)(name, max_time, node) do
         nes = Keyword.get(unquote(es), :on, [])
         f = fn(_f) ->
           Systeme.Core.wait(nes)
@@ -198,7 +198,7 @@ defmodule Systeme.Core do
             _f.(_f)
           end
         end
-        spawn_link(fn ->
+        Node.spawn_link(node, fn ->
           Systeme.Core.__systeme_thread_setup__(unquote(es), name, max_time)
           f.(f)
           Systeme.Core.__systeme_thread_cleanup__()
@@ -407,15 +407,19 @@ defmodule Systeme.Core do
     IO.puts "[SE #{current_time()} #{name()} E]: #{msg}"
   end
 
+  defp find_node() do
+    :erlang.node()
+  end
+
   def run_initial(max_time) do
     __all_systeme_threads__("initial") |> Enum.map(fn({mod, name}) ->
-      apply(mod, name, [name, max_time])
+      apply(mod, name, [name, max_time, find_node()])
     end)
   end
   
   def run_always(max_time) do
     __all_systeme_threads__("always") |> Enum.map(fn({mod, name}) ->
-      apply(mod, name, [name, max_time])
+      apply(mod, name, [name, max_time, find_node()])
     end)
   end
 
