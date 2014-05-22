@@ -102,19 +102,19 @@ defmodule Systeme.Core do
   defp systeme_check_event_driver(e) do
     pid = systeme_get_event_driver(e)
     unless pid do
-      throw("Event #{inspect(e)} has no driver")
+      throw("#{inspect(e)} has no driver")
     end
   end
   defp systeme_check_event_receiver(e) do
     unless Enum.find(Process.get(:systeme_thread_inputs), fn(ne) -> e == ne end) do
-      throw("Event #{inspect(e)} is not a receiver of current thread")
+      throw("#{inspect(e)} is not a receiver of current thread")
     end
   end
   defp systeme_check_event_drivers(e, pid) do
     systeme_check_event_driver(e)
     opid = systeme_get_event_driver(e)
     if opid != pid do
-      throw("Attempt to set multi-drivers for event #{inspect(e)}: #{inspect(opid)} and #{inspect(pid)}")
+      throw("Attempt to set multi-drivers for #{inspect(e)}: #{inspect(opid)} and #{inspect(pid)}")
     end
   end
 

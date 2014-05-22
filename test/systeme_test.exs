@@ -26,7 +26,7 @@ defmodule SystemeTest do
     end
   end
 
-  Enum.each(1..1, fn(_)->
+  Enum.each(1..1000, fn(_)->
   always(on: signal(:clk)) do
     info read_signal(:clk)
   end
