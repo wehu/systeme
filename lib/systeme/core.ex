@@ -408,7 +408,11 @@ defmodule Systeme.Core do
   end
 
   defp find_node() do
-    :erlang.node()
+    nodes = [Node.self() | Node.list()] |> Enum.uniq
+    l = length(nodes)
+    ind = :erlang.trunc(:random.uniform() * l)
+    ind = if ind == l, do: ind - 1, else: ind
+    Enum.at(nodes, ind)
   end
 
   def run_initial(max_time) do
@@ -448,7 +452,7 @@ defmodule Systeme.Core do
     always   = run_always(max_time)
     pids = initials ++ always
     Enum.each(pids, fn(pid) ->
-      send(pid, {:node, :erlang.node()})
+      send(pid, {:node, Node.self()})
       send(pid, {:pids, pids})
     end)
     threads_ready(length(pids))
