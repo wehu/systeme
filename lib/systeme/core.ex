@@ -72,10 +72,32 @@ defmodule Systeme.Core do
     :rpc.call(systeme_master_node(), Systeme.Event, :register_receiver, [e, pid])
   end
   defp systeme_get_event_driver(e) do
-    :rpc.call(systeme_master_node(), Systeme.Event, :get_driver, [e])
+    cache = Process.get(:systeme_event_driver_cache)
+    unless cache do
+      Process.put(:systeme_event_driver_cache, HashDict.new)
+    end
+    cache = Process.get(:systeme_event_driver_cache)
+    if Dict.has_key?(cache, e) do
+      Dict.get(cache, e)
+    else
+      r = :rpc.call(systeme_master_node(), Systeme.Event, :get_driver, [e])
+      Process.put(:systeme_event_driver_cache, Dict.put(cache, e, r))
+      r
+    end
   end
   defp systeme_get_event_receivers(e) do
-    :rpc.call(systeme_master_node(), Systeme.Event, :get_receivers, [e])
+    cache = Process.get(:systeme_event_receivers_cache)
+    unless cache do
+      Process.put(:systeme_event_receivers_cache, HashDict.new)
+    end
+    cache = Process.get(:systeme_event_receivers_cache)
+    if Dict.has_key?(cache, e) do
+      Dict.get(cache, e)
+    else
+      r = :rpc.call(systeme_master_node(), Systeme.Event, :get_receivers, [e])
+      Process.put(:systeme_event_receivers_cache, Dict.put(cache, e, r))
+      r
+    end
   end
   defp systeme_check_event_driver(e) do
     pid = systeme_get_event_driver(e)
