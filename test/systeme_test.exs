@@ -53,7 +53,7 @@ defmodule SystemeTest do
   end
 
   test "the truth" do
-    run(100)
+    run(10000)
     assert(true)
   end
 end

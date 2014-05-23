@@ -122,7 +122,7 @@ defmodule Systeme.Core do
     Process.get(:systeme_master_node)
   end
 
-  def __systeme_thread_setup__(es, name, max_time) do
+  def __systeme_thread_setup__(es, name, max_time, interval) do
     receive do
       {:node, n} -> Process.put(:systeme_master_node, n)
     end
@@ -144,6 +144,8 @@ defmodule Systeme.Core do
     Process.put(:systeme_signals, HashDict.new)
     Process.put(:systeme_thread_name, name)
     Process.put(:systeme_thread_max_time, max_time)
+    Process.put(:systeme_thread_barrier, interval)
+    Process.put(:systeme_thread_barrier_interval, interval)
     receive do
       {:pids, pids} -> Process.put(:systeme_pids, pids)
     end
@@ -155,11 +157,8 @@ defmodule Systeme.Core do
   end
 
   def __systeme_thread_cleanup__() do
-    Process.get(:systeme_thread_outputs) |> Enum.each(fn(e)->
-      systeme_get_event_receivers(e) |> Enum.each(fn(pid) ->
-        send(pid, {e, Process.get(:systeme_thread_max_time), nil, false})
-      end)
-    end)
+    send_null_message(Process.get(:systeme_thread_max_time))
+    send({:system_barrier, systeme_master_node()}, {:finished, self})
     send({:systeme_master, systeme_master_node()}, :finished)
     receive do
       :finished_ok ->
@@ -173,9 +172,9 @@ defmodule Systeme.Core do
     quote bind_quoted: binding do
       id = length(Module.get_attribute(__MODULE__, :systeme_threads))
       n = :"systeme_thread__initial_#{id}"
-      def unquote(n)(name, max_time, node) do
+      def unquote(n)(name, max_time, interval, node) do
         Node.spawn_link(node, fn ->
-          Systeme.Core.__systeme_thread_setup__(unquote(es), name, max_time)
+          Systeme.Core.__systeme_thread_setup__(unquote(es), name, max_time, interval)
           unquote(body)
           Systeme.Core.__systeme_thread_cleanup__()
         end)
@@ -189,17 +188,18 @@ defmodule Systeme.Core do
     quote bind_quoted: binding do
       id = length(Module.get_attribute(__MODULE__, :systeme_threads))
       n = :"systeme_thread__always_#{id}"
-      def unquote(n)(name, max_time, node) do
+      def unquote(n)(name, max_time, interval, node) do
         nes = Keyword.get(unquote(es), :on, [])
         f = fn(_f) ->
           Systeme.Core.wait(nes)
           unquote(body)
+          Systeme.Core.wait_barrier()
           if Systeme.Core.current_time() < max_time do
             _f.(_f)
           end
         end
         Node.spawn_link(node, fn ->
-          Systeme.Core.__systeme_thread_setup__(unquote(es), name, max_time)
+          Systeme.Core.__systeme_thread_setup__(unquote(es), name, max_time, interval)
           f.(f)
           Systeme.Core.__systeme_thread_cleanup__()
         end)
@@ -217,6 +217,26 @@ defmodule Systeme.Core do
 
   def name() do
     Process.get(:systeme_thread_name)
+  end
+
+  defp send_null_message(t) do
+    Process.get(:systeme_thread_outputs) |> Enum.each(fn(e)->
+      systeme_get_event_receivers(e) |> Enum.each(fn(pid) ->
+        send(pid, {e, t, nil, false})
+      end)
+    end)
+  end
+
+  def wait_barrier() do
+    barrier = Process.get(:systeme_thread_barrier)
+    if current_time() >= barrier do
+      send_null_message(current_time())
+      send({:system_barrier, systeme_master_node()}, :reach_barrier)
+      receive do
+        :barrier ->
+      end
+      Process.put(:systeme_thread_barrier, barrier + Process.get(:systeme_thread_barrier_interval))
+    end
   end
 
   def wait(es) when is_list(es) do
@@ -239,11 +259,7 @@ defmodule Systeme.Core do
       Enum.each(es, fn(e)->
         systeme_check_event_driver(e)
         systeme_check_event_receiver(e)
-        Process.get(:systeme_thread_outputs) |> Enum.each(fn(e)->
-          systeme_get_event_receivers(e) |> Enum.each(fn(pid) ->
-            send(pid, {e, current_time(), nil, false})
-          end)
-        end)
+        send_null_message(current_time())
       end)
       es = Enum.reduce(es, HashDict.new, fn(e, acc)->
         Dict.put(acc, e, {current_time(), false})
@@ -299,9 +315,9 @@ defmodule Systeme.Core do
                 end
               end
             end
-            {_, r, t} = get_recent_event(es)
+            {_, r, ct} = get_recent_event(es)
+            set_current_time(ct)
             if r do
-              set_current_time(t)
               Enum.each(Enum.reverse(mq), fn(m)->
                 send(self, m)
               end)
@@ -414,15 +430,15 @@ defmodule Systeme.Core do
     Enum.at(nodes, ind)
   end
 
-  def run_initial(max_time) do
+  def run_initial(max_time, interval) do
     __all_systeme_threads__("initial") |> Enum.map(fn({mod, name}) ->
-      apply(mod, name, [name, max_time, find_node()])
+      apply(mod, name, [name, max_time, interval, find_node()])
     end)
   end
   
-  def run_always(max_time) do
+  def run_always(max_time, interval) do
     __all_systeme_threads__("always") |> Enum.map(fn({mod, name}) ->
-      apply(mod, name, [name, max_time, find_node()])
+      apply(mod, name, [name, max_time, interval, find_node()])
     end)
   end
 
@@ -442,14 +458,35 @@ defmodule Systeme.Core do
   defp threads_terminated(0) do
   end
 
-  def run(max_time) do
+  defp start_barrier(pids) do
+    spawn_link(__MODULE__, :run_barrier, [pids, length(pids)]) |> Process.register(:system_barrier)
+  end
+
+  def run_barrier(pids, size) when size > 0 do
+    receive do
+      {:finished, pid} ->
+        pids = List.delete(pids, pid)
+        run_barrier(pids, size - 1)
+      :reach_barrier -> run_barrier(pids, size - 1)
+    end
+  end
+  def run_barrier(pids, 0) do
+    Enum.each(pids, fn(pid)->
+      send(pid, :barrier)
+    end)
+    run_barrier(pids, length(pids))
+  end
+
+  def run(max_time, opts \\ []) do
+    interval = Keyword.get(opts, :sync_interval) || 100
     IO.puts "Systeme simulator start"
     Process.register(self, :systeme_master)
     Systeme.Event.start()
     #:application.start(:gproc)
-    initials = run_initial(max_time)
-    always   = run_always(max_time)
+    initials = run_initial(max_time, interval)
+    always   = run_always(max_time, interval)
     pids = initials ++ always
+    start_barrier(pids)
     Enum.each(pids, fn(pid) ->
       send(pid, {:node, Node.self()})
       send(pid, {:pids, pids})
