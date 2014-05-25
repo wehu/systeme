@@ -139,9 +139,10 @@ defmodule Systeme.Core do
     Enum.each(ies, fn(e)->
       systeme_set_event_receiver(e, self)
     end)
+    Process.put(:systeme_thread_messages, [])
     Process.put(:systeme_thread_outputs, oes)
     Process.put(:systeme_thread_inputs, ies)
-    Process.put(:systeme_signals, HashDict.new)
+    Process.put(:systeme_thread_signals, HashDict.new)
     Process.put(:systeme_thread_name, name)
     Process.put(:systeme_thread_max_time, max_time)
     Process.put(:systeme_thread_barrier, interval)
@@ -154,6 +155,18 @@ defmodule Systeme.Core do
     receive do
       :go ->
     end
+  end
+
+  defp get_messages() do
+    Process.get(:systeme_thread_messages)
+  end
+
+  defp set_messages(ms) do
+    Process.put(:systeme_thread_messages, ms)
+  end
+
+  defp push_message(m) do
+    set_messages([m|get_messages()])
   end
 
   def __systeme_thread_cleanup__() do
@@ -213,6 +226,7 @@ defmodule Systeme.Core do
 
   def set_current_time(t \\ 0) do
     Process.put(:sim_time, t)
+    send_null_message(current_time())
   end
 
   def name() do
@@ -336,20 +350,19 @@ defmodule Systeme.Core do
   defp wait_flush(ct) do
     receive do
       {e, t, v, rm} when t <= ct ->
-        if rm do
-          case e do
-            {:signal, s} ->
-              vt = Process.get(:systeme_signals) |> Dict.get(s)
-              if vt do
-                {_, ot} = vt
-                if ot <= t do
-                  Process.put(:systeme_signals, (Process.get(:systeme_signals) |> Dict.put(s, {v, t})))
-                end
-              else
-                Process.put(:systeme_signals, (Process.get(:systeme_signals) |> Dict.put(s, {v, t})))
+        case e do
+          {:signal, s} ->
+            vt = get_signal(s)
+            if vt do
+              {ov, ot} = vt
+              if ot <= t do
+                v = if rm, do: v, else: ov
+                set_signal(s, v, t)
               end
-            _ ->
-          end
+            else
+              if rm, do: set_signal(s, v, t)
+            end
+          _ ->
         end
         wait_flush(ct)
     after 0 ->
@@ -384,22 +397,54 @@ defmodule Systeme.Core do
     end
   end
 
+  defp get_signal(s) do
+    Process.get(:systeme_thread_signals) |> Dict.get(s)
+  end
+
+  defp set_signal(s, v, t) do
+#IO.puts "#{s} #{v} #{t}"
+    Process.put(:systeme_thread_signals, Process.get(:systeme_thread_signals) |> Dict.put(s, {v, t}))
+  end
+
+  defp wait_signal(s) do
+    ct = current_time()
+    #send_null_message(ct)
+    wait_flush(ct)
+    vt = get_signal(s)
+    if vt do
+      {ov, ot} = vt
+      if ot < ct do
+        receive do
+          {{:signal, ^s}, t, v, rm} when t <= ct ->
+            v = if rm, do: v, else: ov
+            if ot <= t, do: set_signal(s, v, t)
+            if t < ct do
+              wait_signal(s)
+            end
+        end
+      end
+    else
+      receive do
+        {{:signal, ^s}, t, v, rm} when t <= ct ->
+          if rm, do: set_signal(s, v, t)
+          #if t < ct do
+            wait_signal(s)
+          #end
+      end
+    end
+  end
+
   def read_signal(s, dv \\ nil) do
     systeme_check_event_receiver(signal(s))
     systeme_check_event_driver(signal(s))
-    v = (Process.get(:systeme_signals) |> Dict.get(s))
-    if v do
-      {v, _} = v
-      v
-    else
-      if dv do
-        dv
-      else
-        wait(signal(s))
-        {v, _} = Process.get(:systeme_signals) |> Dict.get(s)
-        v
-      end
+    v = get_signal(s)
+    if !v && dv do
+      set_signal(s, dv, current_time())
     end
+    wait_signal(s)
+    {v, _} = get_signal(s)
+#IO.puts "#{s} #{v} #{current_time()}"
+    v
   end
 
   def write_signal(s, v) do

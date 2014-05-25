@@ -2,58 +2,33 @@ defmodule SystemeTest do
   use ExUnit.Case
   use Systeme.Core
 
-  initial(output: [signal(:bbb)]) do
-   write_signal(:bbb, 0)
-   info "a"
-   wait(time(2))
-   write_signal(:bbb, 1)
-  end
-  initial(output: signal(:aaa)) do
-   write_signal(:aaa, 1)
-   info "b"
-   wait(time(1))
-   info "c"
-   info read_signal(:aaa)
-   wait(time(10))
+  initial(output: signal(:data_in)) do
+    write_signal(:data_in, 1)
   end
 
-  always(on: time(3), output: [signal(:clk), event(:aaa), event(:bbb)]) do
+  always(on: time(3), output: signal(:clk)) do
     clk = read_signal(:clk, 0)
     write_signal(:clk, (if clk == 1, do: 0, else: 1))
-    notify(event(:aaa))
-    if clk == 0 do
-      notify(event(:bbb))
-    end
   end
 
-  Enum.each(1..1000, fn(_)->
-  always(on: signal(:clk)) do
-    info read_signal(:clk)
-  end
-  always(on: event(:aaa)) do
-    info "aaa"
-  end
-  end)
-  always(on: [event(:aaa), event(:bbb)], output: [event(:ccc)]) do
-    info "bbb"
-    wait(time(2))
-    notify(event(:ccc))
-  end
-  always(on: event(:ccc)) do
-    info "ccc"
+  always(on: signal(:clk), output: signal(:crc_reg),
+    input: [signal(:next_crc)]) do
+    next_crc = read_signal(:next_crc, 0xffff)
+    write_signal(:crc_reg, next_crc)
   end
 
-  always(on: signal(:aaa)) do
-    info "aaaaa"
-    info read_signal(:aaa)
+  always(on: [signal(:crc_reg)],
+      output: [signal(:next_crc)]) do
+    data = read_signal(:crc_reg, 0xffff) + 1 #read_signal(:data_in)
+    write_signal(:next_crc, data)
   end
-  always(on: [signal(:bbb), signal(:aaa)]) do
-    info "bbbbb"
-    info read_signal(:aaa)
+
+  always(on: signal(:crc_reg)) do
+    info read_signal(:crc_reg)
   end
 
   test "the truth" do
-    run(10000)
+    run(100, sync_interval: 100)
     assert(true)
   end
 end
