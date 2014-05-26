@@ -150,11 +150,11 @@ defmodule Systeme.Core do
     receive do
       {:pids, pids} -> Process.put(:systeme_pids, pids)
     end
-    Systeme.Core.set_current_time(0)
     send({:systeme_master, systeme_master_node()}, :ready)
     receive do
       :go ->
     end
+    Systeme.Core.set_current_time(0)
   end
 
   defp get_messages() do
@@ -226,7 +226,7 @@ defmodule Systeme.Core do
 
   def set_current_time(t \\ 0) do
     Process.put(:sim_time, t)
-    send_null_message(current_time())
+    send_null_message(t)
   end
 
   def name() do
@@ -236,7 +236,7 @@ defmodule Systeme.Core do
   defp send_null_message(t) do
     Process.get(:systeme_thread_outputs) |> Enum.each(fn(e)->
       systeme_get_event_receivers(e) |> Enum.each(fn(pid) ->
-        send(pid, {e, t, nil, false})
+       send(pid, {e, t, nil, false})
       end)
     end)
   end
@@ -329,7 +329,7 @@ defmodule Systeme.Core do
                 end
               end
             end
-            {_, r, ct} = get_recent_event(es)
+            {e, r, ct} = get_recent_event(es)
             set_current_time(ct)
             if r do
               Enum.each(Enum.reverse(mq), fn(m)->
@@ -347,8 +347,15 @@ defmodule Systeme.Core do
     end
   end
 
-  defp wait_flush(ct) do
+  defp wait_flush(ct, first \\ true) do
     receive do
+      #{{:signal, s}, t, _, false} when first ->
+      #  vt = get_signal(s)
+      #  if vt do
+      #    {ov, ot} = vt
+      #    if ot < t, do: set_signal(s, ov, t)
+      #  end
+      #  wait_flush(ct)
       {e, t, v, rm} when t <= ct ->
         case e do
           {:signal, s} ->
@@ -364,7 +371,7 @@ defmodule Systeme.Core do
             end
           _ ->
         end
-        wait_flush(ct)
+        wait_flush(ct, false)
     after 0 ->
     end
   end
@@ -402,7 +409,6 @@ defmodule Systeme.Core do
   end
 
   defp set_signal(s, v, t) do
-#IO.puts "#{s} #{v} #{t}"
     Process.put(:systeme_thread_signals, Process.get(:systeme_thread_signals) |> Dict.put(s, {v, t}))
   end
 
@@ -417,7 +423,7 @@ defmodule Systeme.Core do
         receive do
           {{:signal, ^s}, t, v, rm} when t <= ct ->
             v = if rm, do: v, else: ov
-            if ot <= t, do: set_signal(s, v, t)
+            if t >= ot, do: set_signal(s, v, t)
             if t < ct do
               wait_signal(s)
             end
@@ -443,7 +449,6 @@ defmodule Systeme.Core do
     end
     wait_signal(s)
     {v, _} = get_signal(s)
-#IO.puts "#{s} #{v} #{current_time()}"
     v
   end
 
