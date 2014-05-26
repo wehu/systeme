@@ -292,11 +292,15 @@ defmodule Systeme.Core do
   defp get_recent_event(es) do
     e = {_, r, t} = Enum.reduce(Dict.keys(es), {nil, nil, nil}, fn(e, acc)->
       {t, ee} = Dict.get(es, e)
-      {_, _, at} = acc
-      if !at || t <= at do
+      {_, r, at} = acc
+      if !at || t < at do
         {e, ee, t}
       else
-        acc
+        if t == at && !r do
+          {e, ee, t}
+        else
+          acc
+        end
       end
     end)
     if !r && t >= Process.get(:systeme_thread_max_time) do
