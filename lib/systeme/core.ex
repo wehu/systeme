@@ -166,7 +166,28 @@ defmodule Systeme.Core do
   end
 
   defp push_message(m) do
+    set_messages(get_messages()++[m])
+  end
+
+  defp unshift_messages(ms) do
+    set_messages(ms++get_messages())
+  end
+
+  defp unshift_message(m) do
     set_messages([m|get_messages()])
+  end
+
+  defp get_message() do
+    ms = get_messages()
+    if length(ms) > 0 do
+      [m|ms] = get_messages()
+      set_messages(ms)
+      m
+    else
+      receive do
+        m -> m
+      end
+    end
   end
 
   def __systeme_thread_cleanup__() do
@@ -290,14 +311,14 @@ defmodule Systeme.Core do
   end
 
   defp get_recent_event(es) do
-    e = {_, r, t} = Enum.reduce(Dict.keys(es), {nil, nil, nil}, fn(e, acc)->
-      {t, ee} = Dict.get(es, e)
-      {_, r, at} = acc
+    e = {_, t, r} = Enum.reduce(Dict.keys(es), {nil, nil, nil}, fn(e, acc)->
+      {t, rm} = Dict.get(es, e)
+      {_, at, r} = acc
       if !at || t < at do
-        {e, ee, t}
+        {e, t, rm}
       else
         if t == at && !r do
-          {e, ee, t}
+          {e, t, rm}
         else
           acc
         end
@@ -310,13 +331,15 @@ defmodule Systeme.Core do
   end
 
   defp wait_loop(es, ct, mq \\ []) do
-    receive do
-      m = {e, t, _, rm} ->
+    m = get_message()
+    #receive do
+    case m do
+      {e, t, _, rm} ->
         mq = [m|mq]
         if Dict.has_key?(es, e) do
           if t >= ct do
-            {et, ee} = Dict.get(es, e)
-            es = if ee do
+            {et, erm} = Dict.get(es, e)
+            es = if erm do
               if rm && et > t do
                 Dict.put(es, e, {t, true})
               else
@@ -333,12 +356,13 @@ defmodule Systeme.Core do
                 end
               end
             end
-            {e, r, ct} = get_recent_event(es)
+            {_, ct, r} = get_recent_event(es)
             set_current_time(ct)
             if r do
-              Enum.each(Enum.reverse(mq), fn(m)->
-                send(self, m)
-              end)
+              unshift_messages(Enum.reverse(mq))
+              #Enum.each(Enum.reverse(mq), fn(m)->
+              #  send(self, m)
+              #end)
             else
               wait_loop(es, ct, mq)
             end
@@ -348,18 +372,36 @@ defmodule Systeme.Core do
         else
           wait_loop(es, ct, mq)
         end
+      _ -> wait_loop(es, ct, mq)
     end
   end
 
-  defp wait_flush(ct, first \\ true) do
+  defp wait_flush(ct) do
+    get_messages() |>
+    Enum.reduce([], fn(m, acc)->
+      {e, t, v, rm} = m
+      case e do
+        {:signal, s} ->
+          vt = get_signal(s)
+          if vt do
+            {ov, ot} = vt
+            if ot <= t do
+              v = if rm && t <= ct, do: v, else: ov
+              set_signal(s, v, t)
+            end
+          else
+            if rm && t <= ct, do: set_signal(s, v, t)
+          end
+        _ ->
+      end
+      if t <= ct do
+        acc
+      else
+        [m|acc]
+      end
+    end) |> Enum.reverse() |>
+    set_messages()
     receive do
-      #{{:signal, s}, t, _, false} when first ->
-      #  vt = get_signal(s)
-      #  if vt do
-      #    {ov, ot} = vt
-      #    if ot < t, do: set_signal(s, ov, t)
-      #  end
-      #  wait_flush(ct)
       {e, t, v, rm} when t <= ct ->
         case e do
           {:signal, s} ->
@@ -375,7 +417,7 @@ defmodule Systeme.Core do
             end
           _ ->
         end
-        wait_flush(ct, false)
+        wait_flush(ct)
     after 0 ->
     end
   end
@@ -425,21 +467,24 @@ defmodule Systeme.Core do
       {ov, ot} = vt
       if ot < ct do
         receive do
-          {{:signal, ^s}, t, v, rm} when t <= ct ->
-            v = if rm, do: v, else: ov
-            if t >= ot, do: set_signal(s, v, t)
-            if t < ct do
-              wait_signal(s)
+          m = {{:signal, ^s}, t, v, rm} ->
+            v = if rm && t <= ct, do: v, else: ov
+            set_signal(s, v, t)
+            if t > ct do
+              unshift_message(m)
             end
+            wait_signal(s)
         end
       end
     else
       receive do
-        {{:signal, ^s}, t, v, rm} when t <= ct ->
-          if rm, do: set_signal(s, v, t)
-          #if t < ct do
-            wait_signal(s)
-          #end
+        m = {{:signal, ^s}, t, v, rm} ->
+          if t <= ct do
+            if rm, do: set_signal(s, v, t)
+          else
+            unshift_message(m)
+          end
+          wait_signal(s)
       end
     end
   end

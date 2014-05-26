@@ -17,9 +17,9 @@ defmodule SystemeTest do
     write_signal(:crc_reg, next_crc)
   end
 
-  always(on: [signal(:crc_reg)],
+  always(on: [signal(:crc_reg), signal(:data_in)],
       output: [signal(:next_crc)]) do
-    data = read_signal(:crc_reg) + 1 #read_signal(:data_in)
+    data = read_signal(:crc_reg, 0xffff) + read_signal(:data_in)
     write_signal(:next_crc, data)
   end
 
@@ -28,7 +28,7 @@ defmodule SystemeTest do
   end
 
   test "the truth" do
-    run(100, sync_interval: 1000)
+    run(100, sync_interval: 100)
     assert(true)
   end
 end
