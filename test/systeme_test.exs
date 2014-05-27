@@ -10,6 +10,7 @@ defmodule SystemeTest do
                    signal(:data_in_5),
                    signal(:data_in_6),
                    signal(:data_in_7)]) do
+    wait(1)
     write_signal(:data_in_0, 1)
     write_signal(:data_in_1, 0)
     write_signal(:data_in_2, 0)

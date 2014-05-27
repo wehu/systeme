@@ -277,6 +277,9 @@ defmodule Systeme.Core do
   end
 
   def wait(es) when is_list(es) do
+    es = Enum.map(es, fn(e)->
+      if is_number(e), do: {:time, e}, else: e
+    end)
     #Enum.each(es, fn(e) ->
     #  :gproc.reg({:p, :l, e})
     #end)
