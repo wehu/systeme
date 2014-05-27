@@ -20,7 +20,7 @@ defmodule SystemeTest do
     write_signal(:data_in_7, 0)
   end
 
-  always(on: time(3), output: signal(:clk)) do
+  always(on: time(1), output: signal(:clk)) do
     clk = read_signal(:clk, 0)
     write_signal(:clk, (if clk == 1, do: 0, else: 1))
   end
@@ -174,16 +174,22 @@ defmodule SystemeTest do
               signal(:crc_reg_9),
               signal(:crc_reg_10),
               signal(:crc_reg_11)]) do
-    info (read_signal(:crc_reg_0, 1) + 2 * (read_signal(:crc_reg_1, 1) +
-          read_signal(:crc_reg_2, 1) + 2 * (read_signal(:crc_reg_3, 1) +
-          read_signal(:crc_reg_4, 1) + 2 * (read_signal(:crc_reg_5, 1) +
-          read_signal(:crc_reg_6, 1) + 2 * (read_signal(:crc_reg_7, 1) +
-          read_signal(:crc_reg_8, 1) + 2 * (read_signal(:crc_reg_9, 1) +
-          read_signal(:crc_reg_10, 1) + 2 * (read_signal(:crc_reg_11, 1))))))))
+    #info (read_signal(:crc_reg_0, 1) + 2 * (read_signal(:crc_reg_1, 1) +
+    #      read_signal(:crc_reg_2, 1) + 2 * (read_signal(:crc_reg_3, 1) +
+    #      read_signal(:crc_reg_4, 1) + 2 * (read_signal(:crc_reg_5, 1) +
+    #      read_signal(:crc_reg_6, 1) + 2 * (read_signal(:crc_reg_7, 1) +
+    #      read_signal(:crc_reg_8, 1) + 2 * (read_signal(:crc_reg_9, 1) +
+    #      read_signal(:crc_reg_10, 1) + 2 * (read_signal(:crc_reg_11, 1))))))))
+    info "#{read_signal(:crc_reg_11, 1)}#{read_signal(:crc_reg_10, 1)}" <>
+         "#{read_signal(:crc_reg_9, 1)}#{read_signal(:crc_reg_8, 1)}" <>
+         "#{read_signal(:crc_reg_7, 1)}#{read_signal(:crc_reg_6, 1)}" <>
+         "#{read_signal(:crc_reg_5, 1)}#{read_signal(:crc_reg_4, 1)}" <>
+         "#{read_signal(:crc_reg_3, 1)}#{read_signal(:crc_reg_2, 1)}" <>
+         "#{read_signal(:crc_reg_1, 1)}#{read_signal(:crc_reg_0, 1)}"
   end
 
   test "the truth" do
-    run(100000, sync_interval: 100)
+    run(10, sync_interval: 100)
     assert(true)
   end
 end

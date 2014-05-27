@@ -142,11 +142,13 @@ defmodule Systeme.Core do
     Process.put(:systeme_thread_messages, [])
     Process.put(:systeme_thread_outputs, oes)
     Process.put(:systeme_thread_inputs, ies)
+    Process.put(:systeme_thread_waits, nes)
     Process.put(:systeme_thread_signals, HashDict.new)
     Process.put(:systeme_thread_name, name)
     Process.put(:systeme_thread_max_time, max_time)
     Process.put(:systeme_thread_barrier, interval)
     Process.put(:systeme_thread_barrier_interval, interval)
+    Process.put(:systeme_thread_triggered, -1)
     receive do
       {:pids, pids} -> Process.put(:systeme_pids, pids)
     end
@@ -165,9 +167,9 @@ defmodule Systeme.Core do
     Process.put(:systeme_thread_messages, ms)
   end
 
-  defp push_message(m) do
-    set_messages(get_messages()++[m])
-  end
+  #defp push_message(m) do
+  #  set_messages(get_messages()++[m])
+  #end
 
   defp unshift_messages(ms) do
     set_messages(ms++get_messages())
@@ -278,6 +280,7 @@ defmodule Systeme.Core do
     #Enum.each(es, fn(e) ->
     #  :gproc.reg({:p, :l, e})
     #end)
+    #wait_flush(current_time())
     te = Enum.find(es, fn(e)->
       case e do
         {:time, _} -> true
@@ -294,8 +297,8 @@ defmodule Systeme.Core do
       Enum.each(es, fn(e)->
         systeme_check_event_driver(e)
         systeme_check_event_receiver(e)
-        send_null_message(current_time())
       end)
+      send_null_message(current_time())
       es = Enum.reduce(es, HashDict.new, fn(e, acc)->
         Dict.put(acc, e, {current_time(), false})
       end)
@@ -332,12 +335,12 @@ defmodule Systeme.Core do
 
   defp wait_loop(es, ct, mq \\ []) do
     m = get_message()
-    #receive do
     case m do
       {e, t, _, rm} ->
         mq = [m|mq]
         if Dict.has_key?(es, e) do
           if t >= ct do
+            last_triggered_time = Process.get(:systeme_thread_triggered)
             {et, erm} = Dict.get(es, e)
             es = if erm do
               if rm && et > t do
@@ -347,7 +350,11 @@ defmodule Systeme.Core do
               end
             else
               if rm do
-                Dict.put(es, e, {t, true})
+                if t > ct || last_triggered_time != current_time() do
+                  Dict.put(es, e, {t, true})
+                else
+                  es
+                end
               else
                 if et <= t do
                   Dict.put(es, e, {t, false})
@@ -357,12 +364,12 @@ defmodule Systeme.Core do
               end
             end
             {_, ct, r} = get_recent_event(es)
-            set_current_time(ct)
-            if r do
+            if ct > current_time() do
+              set_current_time(ct)
+            end
+            if r && last_triggered_time < current_time() do
+              Process.put(:systeme_thread_triggered, current_time())
               unshift_messages(Enum.reverse(mq))
-              #Enum.each(Enum.reverse(mq), fn(m)->
-              #  send(self, m)
-              #end)
             else
               wait_loop(es, ct, mq)
             end
@@ -384,13 +391,13 @@ defmodule Systeme.Core do
         {:signal, s} ->
           vt = get_signal(s)
           if vt do
-            {ov, ot} = vt
+            {ov, ot, r} = vt
             if ot <= t do
               v = if rm && t <= ct, do: v, else: ov
-              set_signal(s, v, t)
+              set_signal(s, v, t, r)
             end
           else
-            if rm && t <= ct, do: set_signal(s, v, t)
+            if rm && t <= ct, do: set_signal(s, v, t, rm)
           end
         _ ->
       end
@@ -407,13 +414,14 @@ defmodule Systeme.Core do
           {:signal, s} ->
             vt = get_signal(s)
             if vt do
-              {ov, ot} = vt
+              {ov, ot, r} = vt
               if ot <= t do
                 v = if rm, do: v, else: ov
-                set_signal(s, v, t)
+                r = if rm, do: rm, else: r
+                set_signal(s, v, t, r)
               end
             else
-              if rm, do: set_signal(s, v, t)
+              if rm, do: set_signal(s, v, t, rm)
             end
           _ ->
         end
@@ -454,8 +462,8 @@ defmodule Systeme.Core do
     Process.get(:systeme_thread_signals) |> Dict.get(s)
   end
 
-  defp set_signal(s, v, t) do
-    Process.put(:systeme_thread_signals, Process.get(:systeme_thread_signals) |> Dict.put(s, {v, t}))
+  defp set_signal(s, v, t, r) do
+    Process.put(:systeme_thread_signals, Process.get(:systeme_thread_signals) |> Dict.put(s, {v, t, r}))
   end
 
   defp wait_signal(s) do
@@ -464,12 +472,12 @@ defmodule Systeme.Core do
     wait_flush(ct)
     vt = get_signal(s)
     if vt do
-      {ov, ot} = vt
-      if ot < ct do
+      {ov, ot, r} = vt
+      if ot < ct || (ot == ct && Enum.find(Process.get(:systeme_thread_waits), fn(e)-> e == signal(s) end)) do
         receive do
           m = {{:signal, ^s}, t, v, rm} ->
             v = if rm && t <= ct, do: v, else: ov
-            set_signal(s, v, t)
+            set_signal(s, v, t, r)
             if t > ct do
               unshift_message(m)
             end
@@ -480,7 +488,7 @@ defmodule Systeme.Core do
       receive do
         m = {{:signal, ^s}, t, v, rm} ->
           if t <= ct do
-            if rm, do: set_signal(s, v, t)
+            if rm, do: set_signal(s, v, t, rm)
           else
             unshift_message(m)
           end
@@ -494,10 +502,10 @@ defmodule Systeme.Core do
     systeme_check_event_driver(signal(s))
     v = get_signal(s)
     if !v && dv do
-      set_signal(s, dv, current_time())
+      set_signal(s, dv, current_time(), true)
     end
     wait_signal(s)
-    {v, _} = get_signal(s)
+    {v, _, _} = get_signal(s)
     v
   end
 
